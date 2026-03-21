@@ -59,6 +59,42 @@ serve({
 });
 ```
 
+## Elysia
+
+```typescript
+import { Elysia } from "elysia";
+import { compress } from "bun-serve-compress/elysia";
+
+new Elysia()
+  .use(compress()) // applies globally to all routes
+  .get("/", () => "Hello, World!")
+  .get("/api/data", () => Response.json({ items: [1, 2, 3] }))
+  .listen(3000);
+```
+
+Uses Elysia's `mapResponse` lifecycle hook. Applied globally by default — works across all routes including nested plugins.
+
+## Hono
+
+```typescript
+import { Hono } from "hono";
+import { compress } from "bun-serve-compress/hono";
+
+const app = new Hono();
+
+// Global — all routes
+app.use(compress());
+
+// Or per-route
+app.use("/api/*", compress({ algorithms: ["br", "gzip"] }));
+
+app.get("/", (c) => c.text("Hello, World!"));
+
+export default app;
+```
+
+Uses Hono's middleware pattern with `await next()` to compress responses after handlers execute.
+
 ## Configuration
 
 Pass a `compression` option to customize behavior:
@@ -242,7 +278,7 @@ import type {
 
 ## Testing
 
-208 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, and version guard. Run with:
+234 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, Elysia plugin, and Hono middleware. Run with:
 
 ```bash
 bun test
