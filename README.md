@@ -240,7 +240,7 @@ import type {
 
 ## Testing
 
-207 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, and Bun-specific compatibility. Run with:
+211 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, and version guard. Run with:
 
 ```bash
 bun test
@@ -283,6 +283,18 @@ The `CompressionStream` API (used for bodies > 10MB) does not accept quality/lev
 ## Requirements
 
 - **Bun ≥ 1.3.3** (for `CompressionStream` with zstd support)
+
+The library checks `Bun.version` on import and throws a clear error if the runtime is unsupported:
+
+```
+bun-serve-compress requires Bun >= 1.3.3, but you are running Bun 1.2.0. Please upgrade Bun: bun upgrade
+```
+
+If loaded outside of Bun (e.g., Node.js), it throws:
+
+```
+bun-serve-compress requires the Bun runtime. This library uses Bun-specific APIs (Bun.serve, Bun.gzipSync, CompressionStream with zstd) and cannot run in Node.js or other runtimes.
+```
 
 ## License
 

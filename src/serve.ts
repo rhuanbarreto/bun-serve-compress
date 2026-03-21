@@ -12,6 +12,37 @@ import type {
 } from "./types";
 
 /**
+ * Minimum supported Bun version.
+ * Requires Bun >= 1.3.3 for CompressionStream with zstd support.
+ */
+const MIN_BUN_VERSION = ">=1.3.3";
+
+/**
+ * Check that the current Bun version meets the minimum requirement.
+ * Uses Bun's built-in semver utility for reliable version comparison.
+ * Throws a clear error if not.
+ */
+function checkBunVersion(): void {
+  if (typeof Bun === "undefined" || !Bun.version) {
+    throw new Error(
+      "bun-serve-compress requires the Bun runtime. " +
+      "This library uses Bun-specific APIs (Bun.serve, Bun.gzipSync, CompressionStream with zstd) " +
+      "and cannot run in Node.js or other runtimes."
+    );
+  }
+
+  if (!Bun.semver.satisfies(Bun.version, MIN_BUN_VERSION)) {
+    throw new Error(
+      `bun-serve-compress requires Bun >= 1.3.3, but you are running Bun ${Bun.version}. ` +
+      `Please upgrade Bun: bun upgrade`
+    );
+  }
+}
+
+// Run version check on module load
+checkBunVersion();
+
+/**
  * Resolve user-provided compression options into a fully-populated config
  * with all defaults applied.
  */
