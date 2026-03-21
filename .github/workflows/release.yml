@@ -60,6 +60,22 @@ jobs:
           workflow: pull-request
           github-token: ${{ github.token }}
           branch: release
+      - name: Format and push release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin release
+          git checkout release
+          bun run fmt
+          if git diff --quiet; then
+            echo "No formatting changes needed"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "style: format generated files"
+            git push origin release
+          fi
       - name: Trigger CI on release branch
         env:
           GH_TOKEN: ${{ github.token }}
