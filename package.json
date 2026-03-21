@@ -1,6 +1,6 @@
 {
   "name": "bun-serve-compress",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Transparent HTTP response compression for Bun.serve() — gzip, brotli, zstd",
   "keywords": [
     "accept-encoding",
