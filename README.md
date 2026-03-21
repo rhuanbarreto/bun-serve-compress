@@ -148,6 +148,29 @@ The library handles HTTP semantics properly:
 | Buffered (unknown size) | Buffer → check minSize → sync | Catches small bodies without Content-Length |
 | Streaming (known size > 10MB) | `CompressionStream` | Avoids memory spikes for large responses |
 
+## Testing
+
+191 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, and Bun-specific features. Run with:
+
+```bash
+bun test
+```
+
+### Test suite inspirations
+
+The test suite was designed by studying the test suites of established HTTP compression implementations to ensure comprehensive coverage:
+
+| Library / Server | What we learned | Link |
+|-----------------|----------------|------|
+| **Express/compression** | `Cache-Control: no-transform` (RFC 7234), Vary header semantics, ETag weak/strong handling, threshold behavior, empty body edge cases, quality weight negotiation | [test/compression.js](https://github.com/expressjs/compression/blob/master/test/compression.js) |
+| **Fastify/fastify-compress** | Case-insensitive Accept-Encoding, Content-Type with charset/boundary params, missing Content-Type, custom header preservation, algorithm restriction | [test/global-compress.test.js](https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js) |
+| **Koa/compress** | Unknown algorithm handling (sdch), custom shouldCompress, SVG exception for image/* skip, default/fallback encoding | [test/index.test.ts](https://github.com/koajs/compress/blob/master/test/index.test.ts) |
+| **Go net/http gziphandler** | Threshold boundary conditions (exact size, off-by-one), parallel compression benchmarks, large body integrity, Accept-Encoding: identity | [gzip_test.go](https://github.com/nytimes/gziphandler/blob/master/gzip_test.go) |
+| **Nginx gzip module** | Transfer-Encoding already set, MIME type prefix matching, no-transform directive | [ngx_http_gzip_module docs](https://nginx.org/en/docs/http/ngx_http_gzip_module.html) |
+| **Hono compress** | Cache-Control no-transform, Transfer-Encoding checks, identity encoding handling | [compress/index.test.ts](https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts) |
+
+Each test file includes a detailed header comment documenting which specific test cases came from which source.
+
 ## Requirements
 
 - **Bun ≥ 1.3.3** (for `CompressionStream` with zstd support)

@@ -1,3 +1,28 @@
+/**
+ * Edge case tests — boundary conditions, unusual inputs, spec corner cases.
+ *
+ * Test cases inspired by:
+ *
+ * - Express/compression: empty body (res.end() with no args), null body, Vary header
+ *   deduplication (Accept-Encoding already present), Vary: * preservation
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Go net/http gziphandler: streaming response integrity (verify all chunks present),
+ *   large streaming responses, double WriteHeader protection, status code preservation
+ *   (201) through compression
+ *   https://github.com/nytimes/gziphandler/blob/master/gzip_test.go
+ *
+ * - Nginx gzip module: Transfer-Encoding already set (gzip vs chunked-only distinction),
+ *   Cache-Control no-transform with combined directives, application/wasm skip
+ *   https://nginx.org/en/docs/http/ngx_http_gzip_module.html
+ *
+ * - Fastify/fastify-compress: Content-Type with charset parameter, application/xml and
+ *   application/javascript compression, custom header preservation (X-Request-Id)
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ *
+ * - Hono compress: Accept-Encoding: identity handling, multiple unsupported encodings
+ *   https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts
+ */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../src/serve";
 

@@ -1,3 +1,25 @@
+/**
+ * Accept-Encoding negotiation tests.
+ *
+ * Test cases inspired by:
+ *
+ * - Express/compression: quality weight handling, wildcard (*) behavior, identity encoding
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Fastify/fastify-compress: case-insensitive matching (GZip, GZIP), x-gzip alias,
+ *   whitespace variations in Accept-Encoding header
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ *
+ * - Koa/compress: unknown algorithm handling (sdch), empty vs missing Accept-Encoding
+ *   distinction, default/fallback encoding behavior
+ *   https://github.com/koajs/compress/blob/master/test/index.test.ts
+ *
+ * - Go net/http gziphandler: Accept-Encoding: identity handling, wildcard with q=0 rejection
+ *   https://github.com/nytimes/gziphandler/blob/master/gzip_test.go
+ *
+ * - Real-world browser headers: Chrome/Firefox (gzip, deflate, br, zstd),
+ *   Safari (gzip, deflate, br), older browsers (gzip, deflate), curl --compressed
+ */
 import { describe, expect, test } from "bun:test";
 import { negotiate } from "../src/negotiate";
 

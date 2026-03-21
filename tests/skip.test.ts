@@ -1,3 +1,30 @@
+/**
+ * Skip logic tests — determines when compression should be bypassed.
+ *
+ * Test cases inspired by:
+ *
+ * - Express/compression: Cache-Control no-transform (RFC 7234 §5.2.2.4), Content-Type
+ *   filtering, threshold/minSize behavior, empty body handling, Vary header semantics
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Hono compress: Cache-Control no-transform skip, Transfer-Encoding checks
+ *   https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts
+ *
+ * - Fastify/fastify-compress: Content-Type with charset/boundary parameters, missing
+ *   Content-Type header, application/octet-stream and application/wasm skip
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ *
+ * - Go net/http gziphandler: threshold boundary conditions (exact size, off-by-one),
+ *   Content-Length of 0, status code handling (404/500 should still compress)
+ *   https://github.com/nytimes/gziphandler/blob/master/gzip_test.go
+ *
+ * - Nginx gzip module: Transfer-Encoding already set, gzip_proxied directive behavior,
+ *   MIME type prefix matching (image/*, audio/*, video/*, font/*)
+ *   https://nginx.org/en/docs/http/ngx_http_gzip_module.html
+ *
+ * - Koa/compress: custom shouldCompress function, SVG exception for image/* skip
+ *   https://github.com/koajs/compress/blob/master/test/index.test.ts
+ */
 import { describe, expect, test } from "bun:test";
 import { shouldSkip } from "../src/skip";
 import { getDefaultResolvedConfig } from "../src/constants";

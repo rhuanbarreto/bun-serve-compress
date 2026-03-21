@@ -1,3 +1,14 @@
+/**
+ * HTML import route tests — Bun's frontend bundling compatibility.
+ *
+ * These tests are unique to bun-serve-compress and have no equivalent in other
+ * compression libraries. They verify that our serve() wrapper does not interfere
+ * with Bun's built-in HTML import feature, where `import page from './page.html'`
+ * creates a special module object that Bun.serve() uses for automatic frontend
+ * bundling (JS/CSS transpilation, asset pipeline, HMR in development).
+ *
+ * Reference: https://bun.sh/docs/bundler/html
+ */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../src/serve";
 import homepage from "./fixtures/index.html";

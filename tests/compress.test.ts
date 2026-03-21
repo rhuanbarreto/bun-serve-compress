@@ -1,3 +1,21 @@
+/**
+ * Compression engine tests — roundtrip integrity and HTTP header management.
+ *
+ * Test cases inspired by:
+ *
+ * - Express/compression: Content-Length update/removal after compression,
+ *   Vary header append logic (don't duplicate, preserve *), strong-to-weak ETag
+ *   conversion, custom Brotli quality parameters
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Go net/http gziphandler: roundtrip compression/decompression integrity verification,
+ *   Content-Length removal for streaming, status code preservation through compression
+ *   https://github.com/nytimes/gziphandler/blob/master/gzip_test.go
+ *
+ * - Fastify/fastify-compress: streaming vs buffered compression paths, large body
+ *   handling, custom header preservation through compression pipeline
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ */
 import { describe, expect, test } from "bun:test";
 import { compress, addVaryHeader } from "../src/compress";
 import { getDefaultResolvedConfig } from "../src/constants";

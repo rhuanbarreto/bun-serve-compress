@@ -1,3 +1,20 @@
+/**
+ * Concurrency and large body tests — parallel request handling and data integrity.
+ *
+ * Test cases inspired by:
+ *
+ * - Go net/http gziphandler: parallel compression benchmarks (2KB, 20KB, 100KB payloads
+ *   run concurrently), writer pool double-close protection under concurrent access
+ *   https://github.com/nytimes/gziphandler/blob/master/gzip_test.go
+ *
+ * - Express/compression: large body compression (1MB+), multiple write() calls
+ *   accumulating to large body, hex/binary encoded data integrity
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Fastify/fastify-compress: concurrent requests with different content types,
+ *   mixed compressed/uncompressed responses in parallel
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../src/serve";
 import { brotliDecompressSync } from "node:zlib";

@@ -1,3 +1,24 @@
+/**
+ * Integration tests — full HTTP server with real requests.
+ *
+ * Test cases inspired by:
+ *
+ * - Express/compression: end-to-end compression with algorithm selection, quality weight
+ *   negotiation, Cache-Control no-transform bypass, error page compression (404, 500),
+ *   Vary header set even when not compressing, custom shouldCompress function
+ *   https://github.com/expressjs/compression/blob/master/test/compression.js
+ *
+ * - Fastify/fastify-compress: algorithm restriction (only gzip configured), method-specific
+ *   route handlers, case-insensitive Accept-Encoding, static route repeated serving
+ *   https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js
+ *
+ * - Koa/compress: compression disabled flag, custom minSize threshold, algorithm
+ *   fallback when requested algorithm is not configured
+ *   https://github.com/koajs/compress/blob/master/test/index.test.ts
+ *
+ * - Hono compress: HEAD request bypass, SSE skip, SVG compression (image/* exception)
+ *   https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts
+ */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../src/serve";
 import { brotliDecompressSync } from "node:zlib";
