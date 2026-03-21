@@ -64,3 +64,17 @@ export interface ResolvedCompressionOptions {
   skipMimePrefixes: string[];
   shouldCompress?: (req: Request, res: Response) => boolean;
 }
+
+/**
+ * Options for the `serve()` function.
+ *
+ * Extends Bun's native `Serve.Options` with an optional `compression` field.
+ * All Bun.serve() type inference (route params, WebSocket data, etc.) is preserved.
+ */
+export type ServeCompressOptions<
+  WebSocketData = undefined,
+  R extends string = string,
+> = Bun.Serve.Options<WebSocketData, R> & {
+  /** Compression configuration. Omit or pass `false` to disable. */
+  compression?: CompressionOptions | false;
+};

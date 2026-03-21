@@ -2,7 +2,7 @@ import { compress, addVaryHeader } from "./compress";
 import { resolveConfig } from "./config";
 import { negotiate } from "./negotiate";
 import { shouldSkip } from "./skip";
-import type { ResolvedCompressionOptions } from "./types";
+import type { ResolvedCompressionOptions, ServeCompressOptions } from "./types";
 
 /**
  * Minimum supported Bun version (semver range).
@@ -36,6 +36,69 @@ function checkBunVersion(): void {
 // Run version check on module load
 checkBunVersion();
 
+// --- Internal types for runtime handler wrapping ---
+
+/**
+ * A fetch handler function matching Bun.serve()'s fetch signature.
+ * Generic over WebSocketData to preserve the server's type through wrapping.
+ */
+type FetchHandler<WS> = (
+  this: Bun.Server<WS>,
+  req: Request,
+  server: Bun.Server<WS>,
+) => Response | void | undefined | Promise<Response | void | undefined>;
+
+/**
+ * A route handler function (path type erased — used internally after iterating routes).
+ */
+type RouteHandlerFn<WS> = (
+  req: Request,
+  server: Bun.Server<WS>,
+) => Response | void | undefined | Promise<Response | void | undefined>;
+
+/**
+ * All possible values a single route entry can hold at runtime.
+ * Matches Bun's route value types with path type erased for internal wrapping.
+ */
+type RouteValue<WS> =
+  | Response
+  | false
+  | Bun.HTMLBundle
+  | Bun.BunFile
+  | RouteHandlerFn<WS>
+  | Partial<Record<string, RouteHandlerFn<WS> | Response>>
+  | null
+  | undefined;
+
+/**
+ * Mutable view of the serve options we need to wrap.
+ * Isolates the properties we modify (fetch, routes) while preserving
+ * all other Bun.serve() options via the base options type.
+ */
+interface WrapTarget<WS> extends Bun.Serve.BaseServeOptions<WS> {
+  fetch?: FetchHandler<WS>;
+  routes?: Record<string, RouteValue<WS>>;
+  [key: string]:
+    | WrapTarget<WS>[keyof Bun.Serve.BaseServeOptions<WS>]
+    | FetchHandler<WS>
+    | Record<string, RouteValue<WS>>
+    | string
+    | number
+    | boolean
+    | object
+    | undefined;
+}
+
+const HTTP_METHODS: ReadonlySet<string> = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "HEAD",
+  "OPTIONS",
+]);
+
 /**
  * The compression middleware logic applied to each response.
  */
@@ -65,19 +128,17 @@ function compressResponse(
 /**
  * Wrap a fetch handler to add compression.
  */
-const HTTP_METHODS = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]);
-
-// eslint-disable-next-line typescript/ban-types, typescript/no-unsafe-function-type -- Bun's fetch handler type is complex
-type AnyFunction = Function;
-
-function wrapFetch(originalFetch: AnyFunction, config: ResolvedCompressionOptions): AnyFunction {
-  return async function (this: any, req: Request, server: any) {
+function wrapFetch<WS>(
+  originalFetch: FetchHandler<WS>,
+  config: ResolvedCompressionOptions,
+): FetchHandler<WS> {
+  return async function (this: Bun.Server<WS>, req: Request, server: Bun.Server<WS>) {
     const response = await originalFetch.call(this, req, server);
 
     // WebSocket upgrade or void return — pass through
     if (!response) return response;
 
-    return compressResponse(req, response as Response, config);
+    return compressResponse(req, response, config);
   };
 }
 
@@ -90,11 +151,11 @@ function wrapFetch(originalFetch: AnyFunction, config: ResolvedCompressionOption
  * - HTML imports (special Bun objects — pass through untouched)
  * - Method-specific objects { GET: handler, POST: handler }
  */
-function wrapRoutes(
-  routes: Record<string, any>,
+function wrapRoutes<WS>(
+  routes: Record<string, RouteValue<WS>>,
   config: ResolvedCompressionOptions,
-): Record<string, any> {
-  const wrapped: Record<string, any> = {};
+): Record<string, RouteValue<WS>> {
+  const wrapped: Record<string, RouteValue<WS>> = {};
 
   for (const [path, handler] of Object.entries(routes)) {
     wrapped[path] = wrapRouteHandler(handler, config);
@@ -106,7 +167,10 @@ function wrapRoutes(
 /**
  * Wrap a single route handler.
  */
-function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any {
+function wrapRouteHandler<WS>(
+  handler: RouteValue<WS>,
+  config: ResolvedCompressionOptions,
+): RouteValue<WS> {
   // false: Bun falls through to the fetch handler. Pass through as-is.
   // null/undefined: no handler. Pass through as-is.
   if (handler === false || handler === null || handler === undefined) {
@@ -116,8 +180,6 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
   // HTML import — Bun handles these specially for frontend bundling.
   // They are objects with specific internal properties that Bun's serve recognizes.
   // We must NOT wrap these — let Bun handle them natively.
-  // HTML imports are typically objects (not Response, not Function) that Bun processes
-  // into its asset pipeline. We detect them by checking they're not a standard type.
   if (isHtmlImport(handler)) {
     return handler;
   }
@@ -132,7 +194,7 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
 
   // Handler function
   if (typeof handler === "function") {
-    return async function (this: any, req: Request, server: any) {
+    return async function (this: Bun.Server<WS>, req: Request, server: Bun.Server<WS>) {
       const response = await handler.call(this, req, server);
       if (!response) return response;
       return compressResponse(req, response, config);
@@ -141,12 +203,15 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
 
   // Method-specific object: { GET: handler, POST: handler, ... }
   if (typeof handler === "object" && !Array.isArray(handler)) {
-    const hasMethodKey = Object.keys(handler).some((key) => HTTP_METHODS.has(key.toUpperCase()));
+    const handlerObj = handler as Record<string, RouteValue<WS>>;
+    const hasMethodKey = Object.keys(handlerObj).some((key) => HTTP_METHODS.has(key.toUpperCase()));
 
     if (hasMethodKey) {
-      const wrappedMethods: Record<string, any> = {};
-      for (const [method, methodHandler] of Object.entries(handler)) {
-        wrappedMethods[method] = wrapRouteHandler(methodHandler, config);
+      const wrappedMethods: Partial<Record<string, RouteHandlerFn<WS> | Response>> = {};
+      for (const [method, methodHandler] of Object.entries(handlerObj)) {
+        wrappedMethods[method] = wrapRouteHandler(methodHandler, config) as
+          | RouteHandlerFn<WS>
+          | Response;
       }
       return wrappedMethods;
     }
@@ -165,20 +230,17 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
  *
  * We must pass these through untouched so Bun's asset pipeline works correctly.
  */
-function isHtmlImport(handler: any): boolean {
+function isHtmlImport<WS>(handler: RouteValue<WS>): handler is Bun.HTMLBundle {
   // HTML imports are not Response, not Function, not null/undefined
   // They are objects that Bun's serve() knows how to handle internally.
-  // The safest detection: it's an object with a default export or
-  // is a module namespace object from an HTML import.
   if (typeof handler !== "object") return false;
+  if (handler === null) return false;
   if (handler instanceof Response) return false;
   if (handler instanceof ReadableStream) return false;
   if (Array.isArray(handler)) return false;
 
-  // Check for Bun's HTML module marker
-  // HTML imports have a specific shape — they're typically the module itself
-  // with properties that Bun uses internally for bundling
   // A method-specific handler would have HTTP method keys (GET, POST, etc.)
+  // HTML imports are objects without those keys.
   const keys = Object.keys(handler);
   const hasMethodKey = keys.some((key) => HTTP_METHODS.has(key.toUpperCase()));
   if (hasMethodKey) return false;
@@ -204,27 +266,36 @@ function isHtmlImport(handler: any): boolean {
  * });
  * ```
  */
-export function serve(options: any): any {
-  // Extract compression config
+export function serve<WebSocketData = undefined, R extends string = string>(
+  options: ServeCompressOptions<WebSocketData, R>,
+): Bun.Server<WebSocketData> {
+  // Extract compression config, leaving Bun.serve() options
   const { compression, ...serveOptions } = options;
 
   // Resolve config with defaults
   const config = resolveConfig(compression);
 
+  // View the options as a mutable object with typed fetch/routes properties.
+  // This cast is safe: serveOptions contains all Bun.serve() properties
+  // (the only removed key is `compression` which Bun doesn't know about).
+  const wrapped = { ...serveOptions } as WrapTarget<WebSocketData>;
+
   // If compression is disabled, just pass through to Bun.serve
   if (config.disable) {
-    return Bun.serve(serveOptions);
+    return Bun.serve(wrapped as Bun.Serve.Options<WebSocketData, string>);
   }
 
   // Wrap fetch handler if present
-  if (serveOptions.fetch) {
-    serveOptions.fetch = wrapFetch(serveOptions.fetch, config);
+  if (wrapped.fetch) {
+    wrapped.fetch = wrapFetch(wrapped.fetch, config);
   }
 
   // Wrap routes if present
-  if (serveOptions.routes) {
-    serveOptions.routes = wrapRoutes(serveOptions.routes, config);
+  if (wrapped.routes) {
+    wrapped.routes = wrapRoutes(wrapped.routes, config);
   }
 
-  return Bun.serve(serveOptions);
+  // Cast to Bun.Serve.Options with erased route paths (string) because
+  // the wrapped handlers lose path-specific BunRequest<Path> generics.
+  return Bun.serve(wrapped as Bun.Serve.Options<WebSocketData, string>);
 }
