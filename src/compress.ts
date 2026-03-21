@@ -17,23 +17,27 @@ const STREAM_FORMAT: Record<CompressionAlgorithm, CompressionFormat> = {
  * Compress data synchronously using the specified algorithm.
  */
 function compressSync(
-  data: Uint8Array,
+  data: Uint8Array<ArrayBuffer>,
   algorithm: CompressionAlgorithm,
   config: ResolvedCompressionOptions,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   switch (algorithm) {
     case "gzip":
-      return Bun.gzipSync(data, { level: config.gzip.level });
+      return Bun.gzipSync(data, { level: config.gzip.level as any }) as Uint8Array<ArrayBuffer>;
 
-    case "br":
-      return brotliCompressSync(data, {
+    case "br": {
+      const result = brotliCompressSync(data);
+      // Apply quality via the params option
+      const compressed = brotliCompressSync(data, {
         params: {
           [zlibConstants.BROTLI_PARAM_QUALITY]: config.brotli.level,
         },
       });
+      return new Uint8Array(compressed.buffer, compressed.byteOffset, compressed.byteLength) as Uint8Array<ArrayBuffer>;
+    }
 
     case "zstd":
-      return Bun.zstdCompressSync(data, { level: config.zstd.level });
+      return Bun.zstdCompressSync(data, { level: config.zstd.level }) as Uint8Array<ArrayBuffer>;
   }
 }
 
@@ -41,9 +45,9 @@ function compressSync(
  * Create a compressed ReadableStream using CompressionStream API.
  */
 function compressStream(
-  body: ReadableStream<Uint8Array>,
+  body: ReadableStream,
   algorithm: CompressionAlgorithm,
-): ReadableStream<Uint8Array> {
+): ReadableStream {
   // Map algorithm names to CompressionStream format
   let format: string;
   switch (algorithm) {
@@ -60,7 +64,7 @@ function compressStream(
   }
 
   const stream = new CompressionStream(format as CompressionFormat);
-  return body.pipeThrough(stream);
+  return body.pipeThrough(stream as any);
 }
 
 /**
@@ -144,10 +148,10 @@ export async function compress(
 
   if (knownSize !== null && knownSize <= MAX_BUFFER_SIZE) {
     // Known size, fits in memory — sync path
-    const buffer = new Uint8Array(await res.arrayBuffer());
+    const buffer = new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>;
     const compressed = compressSync(buffer, algorithm, config);
 
-    return new Response(compressed, {
+    return new Response(compressed as BodyInit, {
       status: res.status,
       statusText: res.statusText,
       headers: buildHeaders(res.headers, algorithm, compressed.byteLength),
@@ -167,11 +171,11 @@ export async function compress(
 
   // Unknown size (no Content-Length) — buffer to check minSize, then compress
   // This handles static Response objects that don't set Content-Length
-  const buffer = new Uint8Array(await res.arrayBuffer());
+  const buffer = new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>;
 
   if (buffer.byteLength < config.minSize) {
     // Below threshold — return uncompressed with original body
-    return new Response(buffer, {
+    return new Response(buffer as BodyInit, {
       status: res.status,
       statusText: res.statusText,
       headers: new Headers(res.headers),
@@ -180,7 +184,7 @@ export async function compress(
 
   const compressed = compressSync(buffer, algorithm, config);
 
-  return new Response(compressed, {
+  return new Response(compressed as BodyInit, {
     status: res.status,
     statusText: res.statusText,
     headers: buildHeaders(res.headers, algorithm, compressed.byteLength),

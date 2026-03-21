@@ -6,9 +6,13 @@
     "moduleResolution": "bundler",
     "types": ["bun-types"],
     "declaration": true,
+    "declarationDir": "dist",
+    "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src"]
 }

@@ -2,22 +2,22 @@
   "name": "bun-serve-compress",
   "version": "0.1.0",
   "description": "Transparent HTTP response compression for Bun.serve() — gzip, brotli, zstd",
-  "module": "src/index.ts",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./src/index.ts",
-      "types": "./src/index.ts"
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
   },
   "scripts": {
     "test": "bun test",
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build ./src/index.ts --outdir ./dist --target bun --minify",
+    "build:types": "tsc --emitDeclarationOnly",
     "prepublishOnly": "bun run build"
-  },
-  "peerDependencies": {
-    "bun-types": ">=1.3.3"
   },
   "devDependencies": {
     "bun-types": "^1.3.9",
@@ -31,7 +31,10 @@
     "zstd",
     "http",
     "server",
-    "serve"
+    "serve",
+    "bun-serve",
+    "content-encoding",
+    "accept-encoding"
   ],
   "license": "MIT",
   "files": [
@@ -43,5 +46,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/rhuanbarreto/bun-serve-compress"
+  },
+  "homepage": "https://github.com/rhuanbarreto/bun-serve-compress#readme",
+  "bugs": {
+    "url": "https://github.com/rhuanbarreto/bun-serve-compress/issues"
+  },
+  "engines": {
+    "bun": ">=1.3.3"
   }
 }
