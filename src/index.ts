@@ -8,4 +8,5 @@ export type {
   CompressionOptions,
   AlgorithmOptions,
   ResolvedCompressionOptions,
+  ServeCompressOptions,
 } from "./types";
