@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.2](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.1...v0.1.2) (2026-03-21)
+
+### Bug Fixes
+
+* **ci:** ignore CHANGELOG.md formatting and fix release pipeline ([#10](https://github.com/rhuanbarreto/bun-serve-compress/issues/10)) ([8d94f5d](https://github.com/rhuanbarreto/bun-serve-compress/commit/8d94f5d6397e117a79e17813420275e3eea29aff))
+
 ## [0.1.1](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.0...v0.1.1) (2026-03-21)
 
 ### Bug Fixes
