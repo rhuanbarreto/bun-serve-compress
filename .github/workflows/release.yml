@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
   id-token: write
   pull-requests: write
@@ -59,10 +60,10 @@ jobs:
           workflow: pull-request
           github-token: ${{ github.token }}
           branch: release
-  validate-release-pr:
-    name: Validate release PR
-    needs: pull-request
-    uses: ./.github/workflows/ci.yml
+      - name: Trigger CI on release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref release
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 10
