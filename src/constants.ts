@@ -26,7 +26,6 @@ export const SKIP_MIME_TYPES: Set<string> = new Set([
   "application/x-bzip2",
   "application/x-7z-compressed",
   "application/x-rar-compressed",
-  "application/x-tar",
 
   // Binary formats
   "application/wasm",
@@ -42,7 +41,7 @@ export const SKIP_MIME_TYPES: Set<string> = new Set([
  * Entire categories of binary/compressed content.
  */
 export const SKIP_MIME_PREFIXES: string[] = [
-  "image/",   // except image/svg+xml — handled specially
+  "image/", // except image/svg+xml — handled specially
   "audio/",
   "video/",
   "font/",
@@ -52,9 +51,7 @@ export const SKIP_MIME_PREFIXES: string[] = [
  * MIME types that are exceptions to the prefix skip rules.
  * These are text-based formats within otherwise-binary categories.
  */
-export const COMPRESSIBLE_EXCEPTIONS: Set<string> = new Set([
-  "image/svg+xml",
-]);
+export const COMPRESSIBLE_EXCEPTIONS: Set<string> = new Set(["image/svg+xml"]);
 
 /**
  * HTTP status codes that indicate no body — skip compression.

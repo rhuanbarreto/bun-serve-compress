@@ -1,8 +1,5 @@
 import type { CompressionAlgorithm } from "./types";
 
-/** Supported algorithms as a Set for quick lookup */
-const SUPPORTED: Set<string> = new Set(["gzip", "br", "zstd"]);
-
 interface EncodingEntry {
   algorithm: string;
   quality: number;

@@ -48,8 +48,7 @@ serve({
   port: 3000,
   routes: {
     "/": homepage, // Bun's HTML bundling works transparently
-    "/api/data": () =>
-      Response.json({ message: "compressed automatically" }),
+    "/api/data": () => Response.json({ message: "compressed automatically" }),
     "/health": {
       GET: () => new Response("ok"),
     },
@@ -77,9 +76,9 @@ serve({
     minSize: 512,
 
     // Per-algorithm settings
-    gzip: { level: 6 },    // 1-9 (default: 6)
-    brotli: { level: 5 },  // 0-11 (default: 5)
-    zstd: { level: 3 },    // 1-22 (default: 3)
+    gzip: { level: 6 }, // 1-9 (default: 6)
+    brotli: { level: 5 }, // 0-11 (default: 5)
+    zstd: { level: 3 }, // 1-22 (default: 3)
 
     // Additional MIME types to skip (merged with built-in list)
     skipMimeTypes: ["application/x-custom-binary"],
@@ -123,27 +122,29 @@ serve({
 - `application/json`
 - `application/javascript`
 - `application/xml`
-- `image/svg+xml` (exception to image/* skip — SVG is text-based)
+- `image/svg+xml` (exception to image/\* skip — SVG is text-based)
 - Any response over 1KB without a matching skip rule
 
 ### Skipped (by default)
 
 **By MIME type (prefix match):**
+
 - `image/*` (except `image/svg+xml`)
 - `audio/*`
 - `video/*`
 - `font/*`
 
 **By MIME type (exact match):**
+
 - `application/zip`, `application/gzip`, `application/x-gzip`
 - `application/x-bzip2`, `application/x-7z-compressed`, `application/x-rar-compressed`
-- `application/x-tar`
 - `application/wasm`
 - `application/octet-stream`
 - `application/pdf`
 - `text/event-stream` (SSE — compression breaks chunked event delivery)
 
 **By HTTP semantics:**
+
 - Responses with existing `Content-Encoding` header (already compressed)
 - Responses with `Transfer-Encoding` containing a compression algorithm (gzip, deflate, br, zstd) — `Transfer-Encoding: chunked` alone does NOT skip
 - Responses with `Cache-Control: no-transform` (RFC 7234 §5.2.2.4 — intermediaries MUST NOT alter the representation)
@@ -182,23 +183,24 @@ Case-insensitive matching is supported (`GZIP`, `GZip`, `gzip` all work).
 
 ## Compression Paths
 
-| Body type | Strategy | When |
-|-----------|----------|------|
-| Known size ≤ 10MB | Sync compression (`Bun.gzipSync`, etc.) | Fastest path for typical responses |
-| Unknown size | Buffer → check minSize → sync compression | Catches small bodies without `Content-Length` (e.g., static `Response` in routes) |
-| Known size > 10MB | `CompressionStream` streaming | Avoids buffering entire body in memory |
+| Body type         | Strategy                                  | When                                                                              |
+| ----------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| Known size ≤ 10MB | Sync compression (`Bun.gzipSync`, etc.)   | Fastest path for typical responses                                                |
+| Unknown size      | Buffer → check minSize → sync compression | Catches small bodies without `Content-Length` (e.g., static `Response` in routes) |
+| Known size > 10MB | `CompressionStream` streaming             | Avoids buffering entire body in memory                                            |
 
 ### Sync compression details
 
-| Algorithm | Implementation | Notes |
-|-----------|---------------|-------|
-| gzip | `Bun.gzipSync(data, { level })` | Native Bun API |
-| brotli | `brotliCompressSync(data, { params })` from `node:zlib` | Bun has no native `Bun.brotliCompressSync()` yet |
-| zstd | `Bun.zstdCompressSync(data, { level })` | Native Bun API |
+| Algorithm | Implementation                                          | Notes                                            |
+| --------- | ------------------------------------------------------- | ------------------------------------------------ |
+| gzip      | `Bun.gzipSync(data, { level })`                         | Native Bun API                                   |
+| brotli    | `brotliCompressSync(data, { params })` from `node:zlib` | Bun has no native `Bun.brotliCompressSync()` yet |
+| zstd      | `Bun.zstdCompressSync(data, { level })`                 | Native Bun API                                   |
 
 ### Streaming compression details
 
 All three algorithms use `CompressionStream` with Bun's extended format support:
+
 - gzip → `new CompressionStream("gzip")`
 - brotli → `new CompressionStream("brotli")` (Bun extension, not in Web standard)
 - zstd → `new CompressionStream("zstd")` (Bun extension, not in Web standard)
@@ -207,14 +209,14 @@ All three algorithms use `CompressionStream` with Bun's extended format support:
 
 The library handles all Bun.serve() route value types:
 
-| Route value | Behavior |
-|-------------|----------|
-| `Response` object | Cloned and compressed per request (note: loses Bun's static route fast path — see [Known Limitations](#known-limitations)) |
-| Handler function `(req) => Response` | Wrapped — response is compressed after handler returns |
-| Method object `{ GET: fn, POST: fn }` | Each method handler is wrapped individually |
-| HTML import (`import page from './page.html'`) | Passed through to Bun's bundler pipeline untouched |
-| `false` | Passed through — Bun falls through to the `fetch` handler |
-| `null` / `undefined` | Passed through as-is |
+| Route value                                    | Behavior                                                                                                                   |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `Response` object                              | Cloned and compressed per request (note: loses Bun's static route fast path — see [Known Limitations](#known-limitations)) |
+| Handler function `(req) => Response`           | Wrapped — response is compressed after handler returns                                                                     |
+| Method object `{ GET: fn, POST: fn }`          | Each method handler is wrapped individually                                                                                |
+| HTML import (`import page from './page.html'`) | Passed through to Bun's bundler pipeline untouched                                                                         |
+| `false`                                        | Passed through — Bun falls through to the `fetch` handler                                                                  |
+| `null` / `undefined`                           | Passed through as-is                                                                                                       |
 
 ## Exported Utilities
 
@@ -222,18 +224,18 @@ The library exports its internal utilities for advanced use cases:
 
 ```typescript
 import {
-  serve,           // Drop-in Bun.serve() replacement
-  negotiate,       // Parse Accept-Encoding → best algorithm
-  shouldSkip,      // Check if compression should be skipped
-  compress,        // Compress a Response object
-  addVaryHeader,   // Add Vary: Accept-Encoding to a Response
+  serve, // Drop-in Bun.serve() replacement
+  negotiate, // Parse Accept-Encoding → best algorithm
+  shouldSkip, // Check if compression should be skipped
+  compress, // Compress a Response object
+  addVaryHeader, // Add Vary: Accept-Encoding to a Response
 } from "bun-serve-compress";
 
 // Types
 import type {
-  CompressionAlgorithm,      // "zstd" | "br" | "gzip"
-  CompressionOptions,        // User-facing config
-  AlgorithmOptions,          // Per-algorithm { level } config
+  CompressionAlgorithm, // "zstd" | "br" | "gzip"
+  CompressionOptions, // User-facing config
+  AlgorithmOptions, // Per-algorithm { level } config
   ResolvedCompressionOptions, // Fully resolved config with defaults
 } from "bun-serve-compress";
 ```
@@ -250,15 +252,15 @@ bun test
 
 The test suite was designed by studying the test suites of established HTTP compression implementations to ensure comprehensive coverage:
 
-| Library / Server | What we learned | Link |
-|-----------------|----------------|------|
-| **Express/compression** | `Cache-Control: no-transform` (RFC 7234), Vary header semantics, ETag weak/strong handling, threshold behavior, empty body edge cases, quality weight negotiation | [test/compression.js](https://github.com/expressjs/compression/blob/master/test/compression.js) |
-| **Fastify/fastify-compress** | Case-insensitive Accept-Encoding, Content-Type with charset/boundary params, missing Content-Type, custom header preservation, algorithm restriction | [test/global-compress.test.js](https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js) |
-| **Koa/compress** | Unknown algorithm handling (sdch), custom shouldCompress, SVG exception for image/* skip, default/fallback encoding | [test/index.test.ts](https://github.com/koajs/compress/blob/master/test/index.test.ts) |
-| **Go net/http gziphandler** | Threshold boundary conditions (exact size, off-by-one), parallel compression benchmarks, large body integrity, Accept-Encoding: identity | [gzip_test.go](https://github.com/nytimes/gziphandler/blob/master/gzip_test.go) |
-| **Nginx gzip module** | Transfer-Encoding already set, MIME type prefix matching, no-transform directive | [ngx_http_gzip_module docs](https://nginx.org/en/docs/http/ngx_http_gzip_module.html) |
-| **Hono compress** | Cache-Control no-transform, Transfer-Encoding checks, identity encoding handling | [compress/index.test.ts](https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts) |
-| **Bun test suite** | Static route cloning, fetch auto-decompression, CompressionStream formats, empty body regression, double-compression prevention | [test/regression/issue/](https://github.com/oven-sh/bun/tree/main/test/regression/issue), [test/js/web/fetch/](https://github.com/oven-sh/bun/tree/main/test/js/web/fetch) |
+| Library / Server             | What we learned                                                                                                                                                   | Link                                                                                                                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Express/compression**      | `Cache-Control: no-transform` (RFC 7234), Vary header semantics, ETag weak/strong handling, threshold behavior, empty body edge cases, quality weight negotiation | [test/compression.js](https://github.com/expressjs/compression/blob/master/test/compression.js)                                                                            |
+| **Fastify/fastify-compress** | Case-insensitive Accept-Encoding, Content-Type with charset/boundary params, missing Content-Type, custom header preservation, algorithm restriction              | [test/global-compress.test.js](https://github.com/fastify/fastify-compress/blob/master/test/global-compress.test.js)                                                       |
+| **Koa/compress**             | Unknown algorithm handling (sdch), custom shouldCompress, SVG exception for image/\* skip, default/fallback encoding                                              | [test/index.test.ts](https://github.com/koajs/compress/blob/master/test/index.test.ts)                                                                                     |
+| **Go net/http gziphandler**  | Threshold boundary conditions (exact size, off-by-one), parallel compression benchmarks, large body integrity, Accept-Encoding: identity                          | [gzip_test.go](https://github.com/nytimes/gziphandler/blob/master/gzip_test.go)                                                                                            |
+| **Nginx gzip module**        | Transfer-Encoding already set, MIME type prefix matching, no-transform directive                                                                                  | [ngx_http_gzip_module docs](https://nginx.org/en/docs/http/ngx_http_gzip_module.html)                                                                                      |
+| **Hono compress**            | Cache-Control no-transform, Transfer-Encoding checks, identity encoding handling                                                                                  | [compress/index.test.ts](https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts)                                                                   |
+| **Bun test suite**           | Static route cloning, fetch auto-decompression, CompressionStream formats, empty body regression, double-compression prevention                                   | [test/regression/issue/](https://github.com/oven-sh/bun/tree/main/test/regression/issue), [test/js/web/fetch/](https://github.com/oven-sh/bun/tree/main/test/js/web/fetch) |
 
 Each test file includes a detailed header comment documenting which specific test cases came from which source.
 

@@ -4,5 +4,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (el) {
     el.textContent = "JavaScript loaded successfully!";
   }
+  // eslint-disable-next-line no-console -- test fixture
   console.log("bun-serve-compress test app loaded");
 });

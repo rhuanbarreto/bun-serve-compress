@@ -24,8 +24,6 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { serve } from "../src/serve";
-import { brotliDecompressSync } from "node:zlib";
-import { join } from "node:path";
 
 const largeBody = "Bun compatibility test content. ".repeat(200);
 
@@ -50,7 +48,7 @@ describe("Bun route type compatibility", () => {
             headers: { "content-type": "text/html" },
           }),
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("fallback: " + largeBody, {
           headers: { "content-type": "text/plain" },
         });
@@ -118,7 +116,7 @@ describe("Bun fetch auto-decompression behavior", () => {
     server = serve({
       port: 0,
       compression: {},
-      fetch(req) {
+      fetch(_req) {
         return new Response(largeBody, {
           headers: { "content-type": "text/html" },
         });
@@ -166,9 +164,7 @@ describe("no double-compression", () => {
       routes: {
         // Response that claims to be already gzip-compressed
         "/pre-gzipped": () => {
-          const compressed = Bun.gzipSync(
-            new TextEncoder().encode(largeBody),
-          );
+          const compressed = Bun.gzipSync(new TextEncoder().encode(largeBody));
           return new Response(compressed, {
             headers: {
               "content-type": "text/html",
@@ -186,7 +182,7 @@ describe("no double-compression", () => {
           });
         },
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("not found", { status: 404 });
       },
     });
@@ -280,10 +276,10 @@ describe("Bun sync compression API compatibility", () => {
   });
 
   test("node:zlib brotliCompressSync produces valid output", () => {
-    const { brotliCompressSync, brotliDecompressSync } = require("node:zlib");
-    const compressed = brotliCompressSync(testData);
+    const zlib = require("node:zlib");
+    const compressed = zlib.brotliCompressSync(testData);
     expect(compressed.byteLength).toBeGreaterThan(0);
-    const decompressed = brotliDecompressSync(compressed);
+    const decompressed = zlib.brotliDecompressSync(compressed);
     expect(new TextDecoder().decode(decompressed)).toBe("Hello, World!");
   });
 });

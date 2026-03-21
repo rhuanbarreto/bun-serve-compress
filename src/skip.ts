@@ -19,11 +19,12 @@ function mimeMatchesSkipList(
   skipTypes: Set<string>,
   skipPrefixes: string[],
 ): boolean {
+  // Exceptions first — these are compressible despite matching prefix rules
+  // (e.g., image/svg+xml is text-based despite the image/* prefix skip)
+  if (COMPRESSIBLE_EXCEPTIONS.has(mime)) return false;
+
   // Exact match
   if (skipTypes.has(mime)) return true;
-
-  // Check if it's an exception (e.g., image/svg+xml is compressible)
-  if (COMPRESSIBLE_EXCEPTIONS.has(mime)) return false;
 
   // Prefix match (e.g., "image/", "audio/")
   for (const prefix of skipPrefixes) {

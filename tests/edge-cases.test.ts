@@ -57,9 +57,7 @@ describe("edge cases", () => {
             start(controller) {
               // ~100KB of data
               for (let i = 0; i < 1000; i++) {
-                controller.enqueue(
-                  new TextEncoder().encode(`line ${i}: ${"x".repeat(100)}\n`),
-                );
+                controller.enqueue(new TextEncoder().encode(`line ${i}: ${"x".repeat(100)}\n`));
               }
               controller.close();
             },
@@ -165,7 +163,7 @@ describe("edge cases", () => {
             headers: { "content-type": "application/javascript" },
           }),
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("not found", { status: 404 });
       },
     });

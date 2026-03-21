@@ -55,7 +55,7 @@ describe("concurrency", () => {
           });
         },
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("fallback", { status: 404 });
       },
     });
@@ -175,9 +175,7 @@ describe("concurrency", () => {
       const wantCompression = i % 2 === 0;
 
       return fetch(`${baseUrl}/html`, {
-        headers: wantCompression
-          ? { "accept-encoding": "gzip" }
-          : { "accept-encoding": "" },
+        headers: wantCompression ? { "accept-encoding": "gzip" } : { "accept-encoding": "" },
         decompress: false,
       } as any).then(async (res) => {
         if (wantCompression) {
@@ -220,7 +218,7 @@ describe("large body integrity", () => {
             headers: { "content-type": "text/plain" },
           }),
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("not found", { status: 404 });
       },
     });

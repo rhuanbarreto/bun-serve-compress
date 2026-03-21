@@ -1,21 +1,15 @@
-import {
-  getDefaultResolvedConfig,
-  SKIP_MIME_PREFIXES,
-  SKIP_MIME_TYPES,
-} from "./constants";
+import { getDefaultResolvedConfig, SKIP_MIME_TYPES } from "./constants";
 import { compress, addVaryHeader } from "./compress";
 import { negotiate } from "./negotiate";
 import { shouldSkip } from "./skip";
-import type {
-  CompressionOptions,
-  ResolvedCompressionOptions,
-} from "./types";
+import type { CompressionOptions, ResolvedCompressionOptions } from "./types";
 
 /**
- * Minimum supported Bun version.
+ * Minimum supported Bun version (semver range).
  * Requires Bun >= 1.3.3 for CompressionStream with zstd support.
  */
-const MIN_BUN_VERSION = ">=1.3.3";
+const MIN_BUN_VERSION_RANGE = ">=1.3.3";
+const MIN_BUN_VERSION_DISPLAY = "1.3.3";
 
 /**
  * Check that the current Bun version meets the minimum requirement.
@@ -26,15 +20,15 @@ function checkBunVersion(): void {
   if (typeof Bun === "undefined" || !Bun.version) {
     throw new Error(
       "bun-serve-compress requires the Bun runtime. " +
-      "This library uses Bun-specific APIs (Bun.serve, Bun.gzipSync, CompressionStream with zstd) " +
-      "and cannot run in Node.js or other runtimes."
+        "This library uses Bun-specific APIs (Bun.serve, Bun.gzipSync, CompressionStream with zstd) " +
+        "and cannot run in Node.js or other runtimes.",
     );
   }
 
-  if (!Bun.semver.satisfies(Bun.version, MIN_BUN_VERSION)) {
+  if (!Bun.semver.satisfies(Bun.version, MIN_BUN_VERSION_RANGE)) {
     throw new Error(
-      `bun-serve-compress requires Bun >= 1.3.3, but you are running Bun ${Bun.version}. ` +
-      `Please upgrade Bun: bun upgrade`
+      `bun-serve-compress requires Bun >= ${MIN_BUN_VERSION_DISPLAY}, but you are running Bun ${Bun.version}. ` +
+        "Please upgrade Bun: bun upgrade",
     );
   }
 }
@@ -46,9 +40,7 @@ checkBunVersion();
  * Resolve user-provided compression options into a fully-populated config
  * with all defaults applied.
  */
-function resolveConfig(
-  options?: CompressionOptions | false,
-): ResolvedCompressionOptions {
+function resolveConfig(options?: CompressionOptions | false): ResolvedCompressionOptions {
   const defaults = getDefaultResolvedConfig();
 
   if (options === false || options?.disable) {
@@ -110,10 +102,7 @@ async function compressResponse(
 /**
  * Wrap a fetch handler to add compression.
  */
-function wrapFetch(
-  originalFetch: Function,
-  config: ResolvedCompressionOptions,
-): Function {
+function wrapFetch(originalFetch: Function, config: ResolvedCompressionOptions): Function {
   return async function (this: any, req: Request, server: any) {
     const response = await originalFetch.call(this, req, server);
 
@@ -185,9 +174,7 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
   // Method-specific object: { GET: handler, POST: handler, ... }
   if (typeof handler === "object" && !Array.isArray(handler)) {
     const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
-    const hasMethodKey = Object.keys(handler).some((key) =>
-      methods.includes(key.toUpperCase()),
-    );
+    const hasMethodKey = Object.keys(handler).some((key) => methods.includes(key.toUpperCase()));
 
     if (hasMethodKey) {
       const wrappedMethods: Record<string, any> = {};

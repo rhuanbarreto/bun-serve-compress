@@ -26,7 +26,7 @@ describe("HTML import routes", () => {
       routes: {
         "/": homepage,
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("not found", { status: 404 });
       },
     });
@@ -82,9 +82,9 @@ describe("HTML import routes", () => {
       expect(jsRes.status).toBe(200);
 
       const contentType = jsRes.headers.get("content-type");
-      expect(
-        contentType?.includes("javascript") || contentType?.includes("text/javascript"),
-      ).toBe(true);
+      expect(contentType?.includes("javascript") || contentType?.includes("text/javascript")).toBe(
+        true,
+      );
     }
   });
 });

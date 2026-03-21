@@ -102,7 +102,7 @@ describe("serve() integration", () => {
             },
           }),
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response("fallback: " + largeBody, {
           headers: { "content-type": "text/plain" },
         });
@@ -423,7 +423,7 @@ describe("serve() with compression disabled", () => {
     server = serve({
       port: 0,
       compression: false,
-      fetch(req) {
+      fetch(_req) {
         return new Response(largeBody, {
           headers: { "content-type": "text/html" },
         });
@@ -460,7 +460,7 @@ describe("serve() with custom config", () => {
           return !req.headers.has("x-no-compress");
         },
       },
-      fetch(req) {
+      fetch(_req) {
         return new Response(largeBody, {
           headers: { "content-type": "text/html" },
         });

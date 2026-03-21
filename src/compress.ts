@@ -1,7 +1,4 @@
-import {
-  brotliCompressSync,
-  constants as zlibConstants,
-} from "node:zlib";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import type { CompressionAlgorithm, ResolvedCompressionOptions } from "./types";
 
 /**
@@ -26,7 +23,11 @@ function compressSync(
           [zlibConstants.BROTLI_PARAM_QUALITY]: config.brotli.level,
         },
       });
-      return new Uint8Array(compressed.buffer, compressed.byteOffset, compressed.byteLength) as Uint8Array<ArrayBuffer>;
+      return new Uint8Array(
+        compressed.buffer,
+        compressed.byteOffset,
+        compressed.byteLength,
+      ) as Uint8Array<ArrayBuffer>;
     }
 
     case "zstd":
@@ -37,10 +38,7 @@ function compressSync(
 /**
  * Create a compressed ReadableStream using CompressionStream API.
  */
-function compressStream(
-  body: ReadableStream,
-  algorithm: CompressionAlgorithm,
-): ReadableStream {
+function compressStream(body: ReadableStream, algorithm: CompressionAlgorithm): ReadableStream {
   // Map algorithm names to CompressionStream format
   let format: string;
   switch (algorithm) {
