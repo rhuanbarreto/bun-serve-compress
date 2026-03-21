@@ -76,11 +76,11 @@ function resolveConfig(options?: CompressionOptions | false): ResolvedCompressio
 /**
  * The compression middleware logic applied to each response.
  */
-async function compressResponse(
+function compressResponse(
   req: Request,
   res: Response,
   config: ResolvedCompressionOptions,
-): Promise<Response> {
+): Response | Promise<Response> {
   // Check if compression should be skipped
   if (shouldSkip(req, res, config)) {
     return res;
@@ -102,14 +102,19 @@ async function compressResponse(
 /**
  * Wrap a fetch handler to add compression.
  */
-function wrapFetch(originalFetch: Function, config: ResolvedCompressionOptions): Function {
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]);
+
+// eslint-disable-next-line typescript/ban-types, typescript/no-unsafe-function-type -- Bun's fetch handler type is complex
+type AnyFunction = Function;
+
+function wrapFetch(originalFetch: AnyFunction, config: ResolvedCompressionOptions): AnyFunction {
   return async function (this: any, req: Request, server: any) {
     const response = await originalFetch.call(this, req, server);
 
     // WebSocket upgrade or void return — pass through
     if (!response) return response;
 
-    return compressResponse(req, response, config);
+    return compressResponse(req, response as Response, config);
   };
 }
 
@@ -156,7 +161,7 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
 
   // Response object (static route) — wrap in a function that clones and compresses per request
   if (handler instanceof Response) {
-    return async function (req: Request) {
+    return function (req: Request) {
       const cloned = handler.clone();
       return compressResponse(req, cloned, config);
     };
@@ -173,8 +178,7 @@ function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any
 
   // Method-specific object: { GET: handler, POST: handler, ... }
   if (typeof handler === "object" && !Array.isArray(handler)) {
-    const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
-    const hasMethodKey = Object.keys(handler).some((key) => methods.includes(key.toUpperCase()));
+    const hasMethodKey = Object.keys(handler).some((key) => HTTP_METHODS.has(key.toUpperCase()));
 
     if (hasMethodKey) {
       const wrappedMethods: Record<string, any> = {};
@@ -213,8 +217,7 @@ function isHtmlImport(handler: any): boolean {
   // with properties that Bun uses internally for bundling
   // A method-specific handler would have HTTP method keys (GET, POST, etc.)
   const keys = Object.keys(handler);
-  const httpMethods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
-  const hasMethodKey = keys.some((key) => httpMethods.includes(key.toUpperCase()));
+  const hasMethodKey = keys.some((key) => HTTP_METHODS.has(key.toUpperCase()));
   if (hasMethodKey) return false;
 
   // If it's an object without HTTP method keys, it's likely an HTML import

@@ -18,7 +18,7 @@ export const DEFAULT_MIN_SIZE = 1024;
  * MIME types that should NOT be compressed (exact matches).
  * These are already compressed or binary formats where compression adds overhead.
  */
-export const SKIP_MIME_TYPES: Set<string> = new Set([
+export const SKIP_MIME_TYPES = new Set<string>([
   // Archives (already compressed)
   "application/zip",
   "application/gzip",
@@ -51,12 +51,12 @@ export const SKIP_MIME_PREFIXES: string[] = [
  * MIME types that are exceptions to the prefix skip rules.
  * These are text-based formats within otherwise-binary categories.
  */
-export const COMPRESSIBLE_EXCEPTIONS: Set<string> = new Set(["image/svg+xml"]);
+export const COMPRESSIBLE_EXCEPTIONS = new Set<string>(["image/svg+xml"]);
 
 /**
  * HTTP status codes that indicate no body — skip compression.
  */
-export const NO_BODY_STATUSES: Set<number> = new Set([
+export const NO_BODY_STATUSES = new Set<number>([
   101, // Switching Protocols (WebSocket)
   204, // No Content
   304, // Not Modified

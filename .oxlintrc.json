@@ -1,16 +1,71 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn"],
+  "plugins": ["typescript", "unicorn", "import", "jsdoc", "promise"],
   "categories": {
     "correctness": "error",
-    "suspicious": "warn",
-    "pedantic": "off",
-    "style": "off",
-    "nursery": "off"
+    "suspicious": "error",
+    "perf": "error",
+    "pedantic": "warn",
+    "style": "warn",
+    "nursery": "off",
+    "restriction": "off"
   },
   "rules": {
     "no-console": "warn",
-    "no-debugger": "error"
+    "no-debugger": "error",
+    "no-magic-numbers": "off",
+    "sort-keys": "off",
+    "sort-imports": "off",
+    "default-case": "off",
+    "capitalized-comments": "off",
+    "no-inline-comments": "off",
+    "curly": "off",
+    "func-style": "off",
+    "import/no-named-export": "off",
+    "import/group-exports": "off",
+    "import/prefer-default-export": "off",
+    "jsdoc/require-returns": "off",
+    "jsdoc/require-param": "off",
+    "unicorn/filename-case": "off",
+    "unicorn/prefer-top-level-await": "off",
+    "unicorn/no-array-for-each": "off",
+    "unicorn/no-null": "off",
+    "unicorn/switch-case-braces": "off",
+    "unicorn/prefer-string-raw": "off",
+    "unicorn/prefer-math-min-max": "off",
+    "unicorn/no-zero-fractions": "off",
+    "no-continue": "off",
+    "no-ternary": "off",
+    "id-length": "off",
+    "func-names": "off",
+    "max-lines": "off",
+    "init-declarations": "off",
+    "prefer-template": "off",
+    "arrow-body-style": "off",
+    "no-negated-condition": "off",
+    "no-nested-ternary": "off",
+    "unicorn/no-nested-ternary": "off",
+    "unicorn/number-literal-case": "off",
+    "prefer-destructuring": "off",
+    "promise/prefer-await-to-then": "off",
+    "unicorn/prefer-query-selector": "off",
+    "max-lines-per-function": "off",
+    "max-statements": "off",
+    "max-params": "off",
+    "import/no-nodejs-modules": "off"
   },
-  "ignorePatterns": ["dist", "node_modules"]
+  "ignorePatterns": ["dist", "node_modules"],
+  "overrides": [
+    {
+      "files": ["tests/**"],
+      "rules": {
+        "no-console": "off",
+        "no-await-in-loop": "off",
+        "typescript/no-require-imports": "off",
+        "typescript/no-var-requires": "off",
+        "promise/always-return": "off",
+        "unicorn/prefer-response-static-json": "off"
+      }
+    }
+  ]
 }
