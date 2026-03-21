@@ -10,7 +10,7 @@ describe("serve() integration", () => {
 
   beforeAll(() => {
     server = serve({
-      port: 0, // Random available port
+      port: 0,
       compression: {
         algorithms: ["zstd", "br", "gzip"],
       },
@@ -47,16 +47,39 @@ describe("serve() integration", () => {
             etag: '"abc123"',
           },
         }),
+        "/no-transform": new Response(largeBody, {
+          headers: {
+            "content-type": "text/html",
+            "cache-control": "public, no-transform, max-age=300",
+          },
+        }),
+        "/error-page": () =>
+          new Response("Error: something went wrong! ".repeat(100), {
+            status: 500,
+            headers: { "content-type": "text/html" },
+          }),
+        "/not-found-page": () =>
+          new Response("Page not found. ".repeat(100), {
+            status: 404,
+            headers: { "content-type": "text/html" },
+          }),
         "/methods": {
           GET: () =>
             new Response(largeBody, {
               headers: { "content-type": "text/html" },
             }),
           POST: () =>
-            new Response(JSON.stringify({ ok: true }), {
+            new Response(JSON.stringify({ ok: true, data: largeBody }), {
               headers: { "content-type": "application/json" },
             }),
         },
+        "/with-vary": () =>
+          new Response(largeBody, {
+            headers: {
+              "content-type": "text/html",
+              vary: "Origin",
+            },
+          }),
       },
       fetch(req) {
         return new Response("fallback: " + largeBody, {
@@ -71,160 +94,303 @@ describe("serve() integration", () => {
     server.stop(true);
   });
 
-  test("compresses with gzip when requested", async () => {
-    const res = await fetch(`${baseUrl}/text`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
+  describe("algorithm selection", () => {
+    test("compresses with gzip when requested", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBe("gzip");
-    expect(res.headers.get("vary")).toInclude("Accept-Encoding");
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+      expect(res.headers.get("vary")).toInclude("Accept-Encoding");
 
-    const compressed = new Uint8Array(await res.arrayBuffer());
-    const decompressed = Bun.gunzipSync(compressed);
-    expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+      const compressed = new Uint8Array(await res.arrayBuffer());
+      const decompressed = Bun.gunzipSync(compressed);
+      expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    });
+
+    test("compresses with brotli when requested", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "br" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("br");
+
+      const compressed = new Uint8Array(await res.arrayBuffer());
+      const decompressed = brotliDecompressSync(compressed);
+      expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    });
+
+    test("compresses with zstd when requested", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "zstd" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("zstd");
+
+      const compressed = new Uint8Array(await res.arrayBuffer());
+      const decompressed = Bun.zstdDecompressSync(compressed);
+      expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    });
+
+    test("prefers zstd when client accepts all", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "gzip, br, zstd" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("zstd");
+    });
+
+    test("respects client quality weights", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "zstd;q=0.1, br;q=1.0, gzip;q=0.5" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("br");
+    });
+
+    test("handles case-insensitive Accept-Encoding", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "GZIP" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
   });
 
-  test("compresses with brotli when requested", async () => {
-    const res = await fetch(`${baseUrl}/text`, {
-      headers: { "accept-encoding": "br" },
-      decompress: false,
-    } as any);
+  describe("no compression cases", () => {
+    test("serves uncompressed when no Accept-Encoding", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBe("br");
+      expect(res.headers.get("content-encoding")).toBeNull();
+    });
 
-    const compressed = new Uint8Array(await res.arrayBuffer());
-    const decompressed = brotliDecompressSync(compressed);
-    expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    test("does not compress small responses (below minSize)", async () => {
+      const res = await fetch(`${baseUrl}/small`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(await res.text()).toBe("tiny");
+    });
+
+    test("does not compress images", async () => {
+      const res = await fetch(`${baseUrl}/image`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBeNull();
+    });
+
+    test("does not compress 204 No Content", async () => {
+      const res = await fetch(`${baseUrl}/no-content`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.status).toBe(204);
+      expect(res.headers.get("content-encoding")).toBeNull();
+    });
+
+    test("does not compress SSE", async () => {
+      const res = await fetch(`${baseUrl}/sse`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBeNull();
+    });
+
+    test("does not compress already-compressed responses", async () => {
+      const res = await fetch(`${baseUrl}/already-compressed`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
+
+    test("does not compress when Cache-Control: no-transform", async () => {
+      const res = await fetch(`${baseUrl}/no-transform`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(res.headers.get("cache-control")).toInclude("no-transform");
+    });
+
+    test("returns uncompressed with Vary when unsupported encoding requested", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "deflate" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(res.headers.get("vary")).toInclude("Accept-Encoding");
+    });
   });
 
-  test("compresses with zstd when requested", async () => {
-    const res = await fetch(`${baseUrl}/text`, {
-      headers: { "accept-encoding": "zstd" },
-      decompress: false,
-    } as any);
+  describe("compresses various content types", () => {
+    test("compresses SVG (text-based image)", async () => {
+      const res = await fetch(`${baseUrl}/svg`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBe("zstd");
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
 
-    const compressed = new Uint8Array(await res.arrayBuffer());
-    const decompressed = Bun.zstdDecompressSync(compressed);
-    expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    test("compresses JSON responses", async () => {
+      const res = await fetch(`${baseUrl}/json`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
+
+    test("compresses fetch fallback handler", async () => {
+      const res = await fetch(`${baseUrl}/unknown-route`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
   });
 
-  test("prefers zstd when client accepts all", async () => {
-    const res = await fetch(`${baseUrl}/text`, {
-      headers: { "accept-encoding": "gzip, br, zstd" },
-      decompress: false,
-    } as any);
+  describe("error responses", () => {
+    test("compresses 500 error pages", async () => {
+      const res = await fetch(`${baseUrl}/error-page`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBe("zstd");
+      expect(res.status).toBe(500);
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+
+      const compressed = new Uint8Array(await res.arrayBuffer());
+      const decompressed = Bun.gunzipSync(compressed);
+      const body = new TextDecoder().decode(decompressed);
+      expect(body).toInclude("Error: something went wrong!");
+    });
+
+    test("compresses 404 error pages", async () => {
+      const res = await fetch(`${baseUrl}/not-found-page`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+    });
   });
 
-  test("serves uncompressed when no Accept-Encoding", async () => {
-    const res = await fetch(`${baseUrl}/text`, {
-      headers: { "accept-encoding": "" },
-      decompress: false,
-    } as any);
+  describe("header management", () => {
+    test("sets Content-Length for sync-compressed responses", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBeNull();
-    const body = await res.text();
-    expect(body).toBe(largeBody);
+      const contentLength = res.headers.get("content-length");
+      expect(contentLength).not.toBeNull();
+      const len = parseInt(contentLength!, 10);
+      expect(len).toBeGreaterThan(0);
+      expect(len).toBeLessThan(largeBody.length);
+    });
+
+    test("converts strong ETag to weak when compressing", async () => {
+      const res = await fetch(`${baseUrl}/with-etag`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("etag")).toBe('W/"abc123"');
+    });
+
+    test("appends to existing Vary header", async () => {
+      const res = await fetch(`${baseUrl}/with-vary`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
+
+      expect(res.headers.get("vary")).toBe("Origin, Accept-Encoding");
+    });
+
+    test("sets Vary even when not compressing (unsupported encoding)", async () => {
+      const res = await fetch(`${baseUrl}/with-vary`, {
+        headers: { "accept-encoding": "deflate" },
+        decompress: false,
+      } as any);
+
+      // Vary should still include Accept-Encoding for correct caching
+      expect(res.headers.get("vary")).toInclude("Accept-Encoding");
+    });
   });
 
-  test("does not compress small responses (below minSize)", async () => {
-    const res = await fetch(`${baseUrl}/small`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
+  describe("route types", () => {
+    test("handles method-specific routes (GET)", async () => {
+      const getRes = await fetch(`${baseUrl}/methods`, {
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBeNull();
-    expect(await res.text()).toBe("tiny");
-  });
+      expect(getRes.headers.get("content-encoding")).toBe("gzip");
+      const compressed = new Uint8Array(await getRes.arrayBuffer());
+      const decompressed = Bun.gunzipSync(compressed);
+      expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
+    });
 
-  test("does not compress images", async () => {
-    const res = await fetch(`${baseUrl}/image`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
+    test("handles method-specific routes (POST)", async () => {
+      const postRes = await fetch(`${baseUrl}/methods`, {
+        method: "POST",
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBeNull();
-  });
+      expect(postRes.headers.get("content-encoding")).toBe("gzip");
+    });
 
-  test("compresses SVG (text-based image)", async () => {
-    const res = await fetch(`${baseUrl}/svg`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
+    test("handles HEAD requests on routes without compression", async () => {
+      const res = await fetch(`${baseUrl}/text`, {
+        method: "HEAD",
+        headers: { "accept-encoding": "gzip" },
+        decompress: false,
+      } as any);
 
-    expect(res.headers.get("content-encoding")).toBe("gzip");
-  });
+      expect(res.headers.get("content-encoding")).toBeNull();
+    });
 
-  test("does not compress 204 No Content", async () => {
-    const res = await fetch(`${baseUrl}/no-content`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
+    test("static Response routes serve same content on repeated requests", async () => {
+      // Verify static routes can be served multiple times (cloning works)
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          fetch(`${baseUrl}/text`, {
+            headers: { "accept-encoding": "gzip" },
+            decompress: false,
+          } as any).then(async (res) => {
+            const compressed = new Uint8Array(await res.arrayBuffer());
+            return new TextDecoder().decode(Bun.gunzipSync(compressed));
+          }),
+        ),
+      );
 
-    expect(res.status).toBe(204);
-    expect(res.headers.get("content-encoding")).toBeNull();
-  });
-
-  test("does not compress SSE", async () => {
-    const res = await fetch(`${baseUrl}/sse`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    expect(res.headers.get("content-encoding")).toBeNull();
-  });
-
-  test("does not compress already-compressed responses", async () => {
-    const res = await fetch(`${baseUrl}/already-compressed`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    // Should still be the original content-encoding, not double-compressed
-    expect(res.headers.get("content-encoding")).toBe("gzip");
-  });
-
-  test("compresses JSON responses", async () => {
-    const res = await fetch(`${baseUrl}/json`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    expect(res.headers.get("content-encoding")).toBe("gzip");
-  });
-
-  test("compresses fetch fallback handler", async () => {
-    const res = await fetch(`${baseUrl}/unknown-route`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    expect(res.headers.get("content-encoding")).toBe("gzip");
-  });
-
-  test("handles method-specific routes", async () => {
-    const getRes = await fetch(`${baseUrl}/methods`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    expect(getRes.headers.get("content-encoding")).toBe("gzip");
-    const compressed = new Uint8Array(await getRes.arrayBuffer());
-    const decompressed = Bun.gunzipSync(compressed);
-    expect(new TextDecoder().decode(decompressed)).toBe(largeBody);
-  });
-
-  test("converts strong ETag to weak when compressing", async () => {
-    const res = await fetch(`${baseUrl}/with-etag`, {
-      headers: { "accept-encoding": "gzip" },
-      decompress: false,
-    } as any);
-
-    expect(res.headers.get("etag")).toBe('W/"abc123"');
+      for (const body of results) {
+        expect(body).toBe(largeBody);
+      }
+    });
   });
 });
 
@@ -267,10 +433,9 @@ describe("serve() with custom config", () => {
     server = serve({
       port: 0,
       compression: {
-        algorithms: ["gzip"], // Only gzip
-        minSize: 10, // Very low threshold
+        algorithms: ["gzip"],
+        minSize: 10,
         shouldCompress: (req) => {
-          // Skip compression for requests with X-No-Compress header
           return !req.headers.has("x-no-compress");
         },
       },
@@ -296,6 +461,15 @@ describe("serve() with custom config", () => {
     expect(res.headers.get("content-encoding")).toBe("gzip");
   });
 
+  test("does not use br when only gzip is configured", async () => {
+    const res = await fetch(`${baseUrl}/`, {
+      headers: { "accept-encoding": "br" },
+      decompress: false,
+    } as any);
+
+    expect(res.headers.get("content-encoding")).toBeNull();
+  });
+
   test("respects custom shouldCompress", async () => {
     const res = await fetch(`${baseUrl}/`, {
       headers: {
@@ -306,5 +480,14 @@ describe("serve() with custom config", () => {
     } as any);
 
     expect(res.headers.get("content-encoding")).toBeNull();
+  });
+
+  test("compresses small bodies with low minSize", async () => {
+    const res = await fetch(`${baseUrl}/`, {
+      headers: { "accept-encoding": "gzip" },
+      decompress: false,
+    } as any);
+
+    expect(res.headers.get("content-encoding")).toBe("gzip");
   });
 });

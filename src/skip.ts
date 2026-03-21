@@ -34,6 +34,19 @@ function mimeMatchesSkipList(
 }
 
 /**
+ * Check if Cache-Control header contains the no-transform directive.
+ * Per RFC 7234 Section 5.2.2.4, intermediaries MUST NOT alter the
+ * representation when no-transform is present.
+ */
+function hasNoTransform(res: Response): boolean {
+  const cacheControl = res.headers.get("cache-control");
+  if (!cacheControl) return false;
+  return cacheControl
+    .split(",")
+    .some((directive) => directive.trim().toLowerCase() === "no-transform");
+}
+
+/**
  * Determine whether compression should be skipped for this request/response pair.
  *
  * Returns true if compression should be SKIPPED (response passed through as-is).
@@ -55,10 +68,30 @@ export function shouldSkip(
   // 4. Response already has Content-Encoding (already compressed)
   if (res.headers.has("content-encoding")) return true;
 
-  // 5. No body
+  // 5. Response already has Transfer-Encoding set (already encoded)
+  const transferEncoding = res.headers.get("transfer-encoding");
+  if (transferEncoding) {
+    const encodings = transferEncoding.toLowerCase();
+    // Skip if there's a content encoding like deflate or gzip in Transfer-Encoding
+    // (chunked alone is fine — it's just framing)
+    if (
+      encodings.includes("gzip") ||
+      encodings.includes("deflate") ||
+      encodings.includes("compress") ||
+      encodings.includes("br") ||
+      encodings.includes("zstd")
+    ) {
+      return true;
+    }
+  }
+
+  // 6. Cache-Control: no-transform — MUST NOT alter representation (RFC 7234)
+  if (hasNoTransform(res)) return true;
+
+  // 7. No body
   if (res.body === null) return true;
 
-  // 6. Check Content-Type against skip list
+  // 8. Check Content-Type against skip list
   const contentType = res.headers.get("content-type");
   if (contentType) {
     const mime = extractMimeType(contentType);
@@ -67,14 +100,14 @@ export function shouldSkip(
     }
   }
 
-  // 7. Body size below minimum threshold (only if Content-Length is known)
+  // 9. Body size below minimum threshold (only if Content-Length is known)
   const contentLength = res.headers.get("content-length");
   if (contentLength !== null) {
     const size = parseInt(contentLength, 10);
     if (!isNaN(size) && size < config.minSize) return true;
   }
 
-  // 8. User's custom shouldCompress function
+  // 10. User's custom shouldCompress function
   if (config.shouldCompress && !config.shouldCompress(req, res)) {
     return true;
   }
