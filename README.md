@@ -8,11 +8,12 @@ A drop-in replacement for `Bun.serve()` that automatically compresses responses 
 
 Bun.serve() has no built-in response compression ([oven-sh/bun#2726](https://github.com/oven-sh/bun/issues/2726)). This library fills that gap with:
 
-- **Smart algorithm negotiation** — zstd > brotli > gzip, respecting client `Accept-Encoding` quality weights
-- **Automatic skip logic** — images, fonts, video, already-compressed responses, small bodies, and SSE are never compressed
-- **Sane defaults** — brotli quality 5 (not 11, which is 30x slower), gzip level 6, zstd level 3
+- **Smart algorithm negotiation** — prefers zstd > brotli > gzip by default, respecting client `Accept-Encoding` quality weights
+- **Automatic skip logic** — images, fonts, video, already-compressed responses, small bodies, SSE, and `Cache-Control: no-transform` are never compressed
+- **Sane defaults** — brotli quality 5 (not 11, which is [~30x slower](https://cran.r-project.org/web/packages/brotli/vignettes/benchmarks.html)), gzip level 6, zstd level 3
 - **Zero config** — works out of the box, but fully customizable
-- **Bun-native** — uses `Bun.gzipSync()`, `Bun.zstdCompressSync()`, and `CompressionStream` for maximum performance
+- **Bun-native** — uses `Bun.gzipSync()`, `Bun.zstdCompressSync()`, and `CompressionStream` for maximum performance; `node:zlib` brotliCompressSync for brotli (Bun has no native `Bun.brotliCompressSync()` yet)
+- **HTTP spec compliant** — correct `Vary`, `Content-Encoding`, `Content-Length`, ETag, and `Cache-Control: no-transform` handling
 
 ## Install
 
@@ -83,9 +84,12 @@ serve({
     // Additional MIME types to skip (merged with built-in list)
     skipMimeTypes: ["application/x-custom-binary"],
 
-    // Custom skip function
+    // OR: override the entire skip list (replaces built-in list completely)
+    // overrideSkipMimeTypes: ["image/png", "application/zip"],
+
+    // Custom skip function (called after all other skip checks pass)
     shouldCompress: (req, res) => {
-      // Return false to skip compression for this request
+      // Return false to skip compression for this request/response
       return !req.url.includes("/raw/");
     },
   },
@@ -98,8 +102,15 @@ serve({
 ### Disable compression entirely
 
 ```typescript
+// Option 1: compression: false
 serve({
   compression: false,
+  // ...
+});
+
+// Option 2: compression.disable
+serve({
+  compression: { disable: true },
   // ...
 });
 ```
@@ -112,21 +123,32 @@ serve({
 - `application/json`
 - `application/javascript`
 - `application/xml`
-- `image/svg+xml`
+- `image/svg+xml` (exception to image/* skip — SVG is text-based)
 - Any response over 1KB without a matching skip rule
 
 ### Skipped (by default)
 
-- Images (`image/*`, except SVG)
-- Audio (`audio/*`)
-- Video (`video/*`)
-- Fonts (`font/*`)
-- Archives (`application/zip`, `application/gzip`, etc.)
-- WebAssembly (`application/wasm`)
-- PDFs (`application/pdf`)
-- Server-Sent Events (`text/event-stream`)
-- Responses with existing `Content-Encoding`
-- Responses smaller than `minSize` (default: 1KB)
+**By MIME type (prefix match):**
+- `image/*` (except `image/svg+xml`)
+- `audio/*`
+- `video/*`
+- `font/*`
+
+**By MIME type (exact match):**
+- `application/zip`, `application/gzip`, `application/x-gzip`
+- `application/x-bzip2`, `application/x-7z-compressed`, `application/x-rar-compressed`
+- `application/x-tar`
+- `application/wasm`
+- `application/octet-stream`
+- `application/pdf`
+- `text/event-stream` (SSE — compression breaks chunked event delivery)
+
+**By HTTP semantics:**
+- Responses with existing `Content-Encoding` header (already compressed)
+- Responses with `Transfer-Encoding` containing a compression algorithm (gzip, deflate, br, zstd) — `Transfer-Encoding: chunked` alone does NOT skip
+- Responses with `Cache-Control: no-transform` (RFC 7234 §5.2.2.4 — intermediaries MUST NOT alter the representation)
+- Responses smaller than `minSize` (default: 1024 bytes)
+- Responses with no body (`null` body)
 - `204 No Content`, `304 Not Modified`, `101 Switching Protocols`
 - `HEAD` requests
 
@@ -134,23 +156,91 @@ serve({
 
 The library handles HTTP semantics properly:
 
-- **`Content-Encoding`** header is set to the chosen algorithm
-- **`Content-Length`** is updated after compression (sync) or removed (streaming)
-- **`Vary: Accept-Encoding`** is appended to all responses (compressed or not)
-- **Strong ETags** are converted to weak ETags when compressing (spec-compliant)
-- **Already-compressed responses** are never double-compressed
+- **`Content-Encoding`** is set to the chosen algorithm (`gzip`, `br`, or `zstd`)
+- **`Content-Length`** is updated to the compressed size (sync path) or removed (streaming path)
+- **`Vary: Accept-Encoding`** is appended when compression is considered — whether the response is compressed or not (for correct cache behavior). It is not added when compression is skipped entirely (e.g., images, HEAD requests)
+- **Strong ETags** are converted to weak ETags (`"abc"` → `W/"abc"`) when compressing, per RFC 7232 — the compressed body is a different representation
+- **Weak ETags** are preserved as-is (already weak)
+- **`Cache-Control: no-transform`** is respected — responses are passed through unmodified per RFC 7234
+- **Already-compressed responses** are never double-compressed (checked via `Content-Encoding` and `Transfer-Encoding` headers)
+- **Status codes** are preserved through compression (200, 201, 404, 500, etc.)
+- **Custom headers** are preserved through compression (X-Request-Id, etc.)
+
+## Algorithm Negotiation
+
+The library parses the client's `Accept-Encoding` header and selects the best algorithm:
+
+1. Parse each algorithm and its quality value (`q=`) from the header
+2. Filter to only algorithms the server supports (configurable via `algorithms` option)
+3. Handle wildcard `*` — gives unlisted supported algorithms the wildcard quality
+4. Handle `identity` — not a compression algorithm, ignored
+5. Handle `q=0` — explicit rejection of an algorithm
+6. Sort by client quality descending, then by server preference order as tiebreaker
+7. Return the best match, or `null` if no acceptable algorithm found
+
+Case-insensitive matching is supported (`GZIP`, `GZip`, `gzip` all work).
 
 ## Compression Paths
 
 | Body type | Strategy | When |
 |-----------|----------|------|
-| Buffered (known size ≤ 10MB) | Sync compression | Fastest for typical responses |
-| Buffered (unknown size) | Buffer → check minSize → sync | Catches small bodies without Content-Length |
-| Streaming (known size > 10MB) | `CompressionStream` | Avoids memory spikes for large responses |
+| Known size ≤ 10MB | Sync compression (`Bun.gzipSync`, etc.) | Fastest path for typical responses |
+| Unknown size | Buffer → check minSize → sync compression | Catches small bodies without `Content-Length` (e.g., static `Response` in routes) |
+| Known size > 10MB | `CompressionStream` streaming | Avoids buffering entire body in memory |
+
+### Sync compression details
+
+| Algorithm | Implementation | Notes |
+|-----------|---------------|-------|
+| gzip | `Bun.gzipSync(data, { level })` | Native Bun API |
+| brotli | `brotliCompressSync(data, { params })` from `node:zlib` | Bun has no native `Bun.brotliCompressSync()` yet |
+| zstd | `Bun.zstdCompressSync(data, { level })` | Native Bun API |
+
+### Streaming compression details
+
+All three algorithms use `CompressionStream` with Bun's extended format support:
+- gzip → `new CompressionStream("gzip")`
+- brotli → `new CompressionStream("brotli")` (Bun extension, not in Web standard)
+- zstd → `new CompressionStream("zstd")` (Bun extension, not in Web standard)
+
+## Route Type Support
+
+The library handles all Bun.serve() route value types:
+
+| Route value | Behavior |
+|-------------|----------|
+| `Response` object | Cloned and compressed per request (note: loses Bun's static route fast path — see [Known Limitations](#known-limitations)) |
+| Handler function `(req) => Response` | Wrapped — response is compressed after handler returns |
+| Method object `{ GET: fn, POST: fn }` | Each method handler is wrapped individually |
+| HTML import (`import page from './page.html'`) | Passed through to Bun's bundler pipeline untouched |
+| `false` | Passed through — Bun falls through to the `fetch` handler |
+| `null` / `undefined` | Passed through as-is |
+
+## Exported Utilities
+
+The library exports its internal utilities for advanced use cases:
+
+```typescript
+import {
+  serve,           // Drop-in Bun.serve() replacement
+  negotiate,       // Parse Accept-Encoding → best algorithm
+  shouldSkip,      // Check if compression should be skipped
+  compress,        // Compress a Response object
+  addVaryHeader,   // Add Vary: Accept-Encoding to a Response
+} from "bun-serve-compress";
+
+// Types
+import type {
+  CompressionAlgorithm,      // "zstd" | "br" | "gzip"
+  CompressionOptions,        // User-facing config
+  AlgorithmOptions,          // Per-algorithm { level } config
+  ResolvedCompressionOptions, // Fully resolved config with defaults
+} from "bun-serve-compress";
+```
 
 ## Testing
 
-191 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, and Bun-specific features. Run with:
+207 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, and Bun-specific compatibility. Run with:
 
 ```bash
 bun test
@@ -168,10 +258,9 @@ The test suite was designed by studying the test suites of established HTTP comp
 | **Go net/http gziphandler** | Threshold boundary conditions (exact size, off-by-one), parallel compression benchmarks, large body integrity, Accept-Encoding: identity | [gzip_test.go](https://github.com/nytimes/gziphandler/blob/master/gzip_test.go) |
 | **Nginx gzip module** | Transfer-Encoding already set, MIME type prefix matching, no-transform directive | [ngx_http_gzip_module docs](https://nginx.org/en/docs/http/ngx_http_gzip_module.html) |
 | **Hono compress** | Cache-Control no-transform, Transfer-Encoding checks, identity encoding handling | [compress/index.test.ts](https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts) |
+| **Bun test suite** | Static route cloning, fetch auto-decompression, CompressionStream formats, empty body regression, double-compression prevention | [test/regression/issue/](https://github.com/oven-sh/bun/tree/main/test/regression/issue), [test/js/web/fetch/](https://github.com/oven-sh/bun/tree/main/test/js/web/fetch) |
 
 Each test file includes a detailed header comment documenting which specific test cases came from which source.
-
-Additionally, the test suite was validated against **Bun's own compression test suite** (`test/js/web/fetch/`, `test/regression/issue/`) to ensure compatibility with Bun's internal HTTP and compression behavior.
 
 ## Known Limitations
 
@@ -186,6 +275,10 @@ Bun's HTTP server has a [TODO comment](https://github.com/oven-sh/bun/issues/272
 ### Bun's fetch() auto-decompression
 
 Bun's `fetch()` client **automatically decompresses** responses and **strips the `Content-Encoding` header**. If you need to verify compression is working in your own tests or debugging, use `fetch(url, { decompress: false })` — this is a Bun-specific option that preserves the raw compressed response.
+
+### Streaming compression quality
+
+The `CompressionStream` API (used for bodies > 10MB) does not accept quality/level parameters for all formats. For the sync path (≤ 10MB), compression levels are fully configurable. For most real-world responses, the sync path is used.
 
 ## Requirements
 
