@@ -1,5 +1,8 @@
 # bun-serve-compress
 
+[![npm](https://img.shields.io/npm/v/bun-serve-compress)](https://www.npmjs.com/package/bun-serve-compress)
+[![license](https://img.shields.io/npm/l/bun-serve-compress)](./LICENSE)
+
 Transparent HTTP response compression for `Bun.serve()` — gzip, brotli, and zstd.
 
 A drop-in replacement for `Bun.serve()` that automatically compresses responses based on the client's `Accept-Encoding` header. No middleware, no configuration required — just swap the import.
