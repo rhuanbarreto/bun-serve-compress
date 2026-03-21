@@ -240,7 +240,7 @@ import type {
 
 ## Testing
 
-211 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, and version guard. Run with:
+208 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, and version guard. Run with:
 
 ```bash
 bun test
