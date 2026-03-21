@@ -78,7 +78,8 @@ type RouteValue<WS> =
 interface WrapTarget<WS> extends Bun.Serve.BaseServeOptions<WS> {
   fetch?: FetchHandler<WS>;
   routes?: Record<string, RouteValue<WS>>;
-  [key: string]: WrapTarget<WS>[keyof Bun.Serve.BaseServeOptions<WS>]
+  [key: string]:
+    | WrapTarget<WS>[keyof Bun.Serve.BaseServeOptions<WS>]
     | FetchHandler<WS>
     | Record<string, RouteValue<WS>>
     | string
