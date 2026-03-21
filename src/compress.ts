@@ -5,16 +5,11 @@ import {
 import type { CompressionAlgorithm, ResolvedCompressionOptions } from "./types";
 
 /**
- * Map from our algorithm names to CompressionStream format names.
- */
-const STREAM_FORMAT: Record<CompressionAlgorithm, CompressionFormat> = {
-  gzip: "gzip",
-  br: "deflate-raw", // placeholder — we'll use the correct brotli format
-  zstd: "gzip", // placeholder — handled below
-};
-
-/**
  * Compress data synchronously using the specified algorithm.
+ *
+ * Uses Bun's native sync compression functions for gzip and zstd,
+ * and node:zlib's brotliCompressSync for brotli (Bun has no native
+ * Bun.brotliCompressSync yet).
  */
 function compressSync(
   data: Uint8Array<ArrayBuffer>,
@@ -26,8 +21,6 @@ function compressSync(
       return Bun.gzipSync(data, { level: config.gzip.level as any }) as Uint8Array<ArrayBuffer>;
 
     case "br": {
-      const result = brotliCompressSync(data);
-      // Apply quality via the params option
       const compressed = brotliCompressSync(data, {
         params: {
           [zlibConstants.BROTLI_PARAM_QUALITY]: config.brotli.level,

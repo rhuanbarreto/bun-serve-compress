@@ -171,6 +171,22 @@ The test suite was designed by studying the test suites of established HTTP comp
 
 Each test file includes a detailed header comment documenting which specific test cases came from which source.
 
+Additionally, the test suite was validated against **Bun's own compression test suite** (`test/js/web/fetch/`, `test/regression/issue/`) to ensure compatibility with Bun's internal HTTP and compression behavior.
+
+## Known Limitations
+
+### Static route performance trade-off
+
+When using static `Response` objects in routes (e.g., `"/": new Response("hello")`), Bun normally serves them via an optimized fast path that bypasses the JS event loop entirely. This library converts static routes into handler functions (to clone and compress per-request), which loses that optimization. For most applications this is negligible — the compression savings far outweigh the routing overhead.
+
+### Future Bun auto-compression
+
+Bun's HTTP server has a [TODO comment](https://github.com/oven-sh/bun/issues/2726) to add built-in compression. If/when Bun adds native auto-compression to `Bun.serve()`, this library could cause double-compression. We will update the library to detect and respect any future Bun compression flag. Monitor issue [#2726](https://github.com/oven-sh/bun/issues/2726) for updates.
+
+### Bun's fetch() auto-decompression
+
+Bun's `fetch()` client **automatically decompresses** responses and **strips the `Content-Encoding` header**. If you need to verify compression is working in your own tests or debugging, use `fetch(url, { decompress: false })` — this is a Bun-specific option that preserves the raw compressed response.
+
 ## Requirements
 
 - **Bun ≥ 1.3.3** (for `CompressionStream` with zstd support)

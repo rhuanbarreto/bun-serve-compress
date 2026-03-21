@@ -119,7 +119,9 @@ function wrapRoutes(
  * Wrap a single route handler.
  */
 function wrapRouteHandler(handler: any, config: ResolvedCompressionOptions): any {
-  if (handler === null || handler === undefined) {
+  // false: Bun falls through to the fetch handler. Pass through as-is.
+  // null/undefined: no handler. Pass through as-is.
+  if (handler === false || handler === null || handler === undefined) {
     return handler;
   }
 
