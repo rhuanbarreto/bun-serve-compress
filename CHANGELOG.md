@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.4](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.3...v0.1.4) (2026-03-22)
+
+### Bug Fixes
+
+* **ci:** prevent duplicate release PRs with concurrency groups ([#16](https://github.com/rhuanbarreto/bun-serve-compress/issues/16)) ([bf6c652](https://github.com/rhuanbarreto/bun-serve-compress/commit/bf6c6524a04e16f03d3ce39f3fd3564d0047faad))
+
 ## [0.1.3](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.2...v0.1.3) (2026-03-21)
 
 ### Bug Fixes
