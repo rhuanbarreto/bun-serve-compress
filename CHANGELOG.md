@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.3](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.2...v0.1.3) (2026-03-21)
+
+### Bug Fixes
+
+* add proper type inference to serve() ([#12](https://github.com/rhuanbarreto/bun-serve-compress/issues/12)) ([65d7f88](https://github.com/rhuanbarreto/bun-serve-compress/commit/65d7f888ca74e390f6a9b9448d6b0bf632dd3c69))
+
 ## [0.1.2](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.1...v0.1.2) (2026-03-21)
 
 ### Bug Fixes
