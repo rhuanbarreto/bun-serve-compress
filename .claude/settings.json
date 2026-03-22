@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun -e \"const d=await Bun.stdin.json();const f=d.tool_response?.filePath??d.tool_input?.file_path??'';if(f.match(/\\.(ts|tsx|js|jsx)$/)){const p=Bun.spawn(['bun','run','fmt'],{stdout:'inherit',stderr:'inherit'});await p.exited}\"",
+            "timeout": 15,
+            "statusMessage": "Formatting..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun -e \"const d=await Bun.stdin.json();const cmd=d.tool_input?.command??'';if(!/\\bgit\\s+commit\\b/.test(cmd))process.exit(0);const p=Bun.spawn(['bun','run','check'],{stdout:'inherit',stderr:'inherit'});await p.exited;if(p.exitCode!==0){console.log(JSON.stringify({decision:'block',reason:'Pre-commit check failed (lint/format/typecheck). Fix issues before committing.'}))}\"",
+            "timeout": 60,
+            "statusMessage": "Running pre-commit checks..."
+          }
+        ]
+      }
+    ]
+  }
+}
