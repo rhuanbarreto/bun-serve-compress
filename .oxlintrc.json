@@ -70,7 +70,9 @@
     {
       "files": [".archgate/adrs/*.rules.ts"],
       "rules": {
-        "typescript/triple-slash-reference": "off"
+        "typescript/triple-slash-reference": "off",
+        "no-await-in-loop": "off",
+        "unicorn/prefer-string-replace-all": "off"
       }
     }
   ]
