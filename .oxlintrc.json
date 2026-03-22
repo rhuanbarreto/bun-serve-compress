@@ -66,6 +66,12 @@
         "promise/always-return": "off",
         "unicorn/prefer-response-static-json": "off"
       }
+    },
+    {
+      "files": [".archgate/adrs/*.rules.ts"],
+      "rules": {
+        "typescript/triple-slash-reference": "off"
+      }
     }
   ]
 }
