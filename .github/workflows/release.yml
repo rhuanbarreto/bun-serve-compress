@@ -8,8 +8,8 @@ on:
       - main
 
 concurrency:
-  group: release-${{ github.ref_name }}
-  cancel-in-progress: false
+  group: release
+  cancel-in-progress: true
 
 permissions:
   actions: write
@@ -86,6 +86,9 @@ jobs:
     name: Release
     needs: check
     if: needs.check.outputs.workflow == 'release'
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
