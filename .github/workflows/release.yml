@@ -73,7 +73,7 @@ jobs:
 
           gh workflow run ci.yml --ref release
           sleep 5
-          RUN_ID=$(gh run list --branch release --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+          RUN_ID=$(gh run list --branch release --workflow ci.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')
           echo "Waiting for CI run $RUN_ID..."
           gh run watch "$RUN_ID" --exit-status && STATUS=success || STATUS=failure
 
