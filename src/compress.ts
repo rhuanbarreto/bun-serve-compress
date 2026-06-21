@@ -31,7 +31,7 @@ function compressSync(
     }
 
     case "zstd":
-      return Bun.zstdCompressSync(data, { level: config.zstd.level }) as Uint8Array<ArrayBuffer>;
+      return Bun.zstdCompressSync(data, { level: config.zstd.level }) as unknown as Uint8Array<ArrayBuffer>;
   }
 }
 

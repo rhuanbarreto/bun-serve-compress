@@ -8,7 +8,7 @@ import type { ResolvedCompressionOptions } from "./types";
  * "text/html; charset=utf-8" → "text/html"
  */
 function extractMimeType(contentType: string): string {
-  return contentType.split(";")[0].trim().toLowerCase();
+  return contentType.split(";")[0]!.trim().toLowerCase();
 }
 
 /**
