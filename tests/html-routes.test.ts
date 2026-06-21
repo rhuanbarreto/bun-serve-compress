@@ -72,11 +72,11 @@ describe("HTML import routes", () => {
     const html = await htmlRes.text();
 
     // Extract script src from the HTML
-    const scriptMatch = html.match(/src="([^"]+\.js[^"]*)"/);
-    if (scriptMatch) {
-      const scriptUrl = scriptMatch[1].startsWith("http")
-        ? scriptMatch[1]
-        : `${baseUrl}${scriptMatch[1].startsWith("/") ? "" : "/"}${scriptMatch[1]}`;
+    const scriptMatch = html.match(/src="(?<src>[^"]+\.js[^"]*)"/u);
+    if (scriptMatch?.groups?.src) {
+      const scriptUrl = scriptMatch.groups.src.startsWith("http")
+        ? scriptMatch.groups.src
+        : `${baseUrl}${scriptMatch.groups.src.startsWith("/") ? "" : "/"}${scriptMatch.groups.src}`;
 
       const jsRes = await fetch(scriptUrl);
       expect(jsRes.status).toBe(200);

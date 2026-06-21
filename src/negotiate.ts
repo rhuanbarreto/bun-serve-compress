@@ -20,12 +20,13 @@ function parseAcceptEncoding(header: string): EncodingEntry[] {
     if (!trimmed) continue;
 
     const [algorithm, ...params] = trimmed.split(";").map((s) => s.trim());
+    if (!algorithm) continue;
     let quality = 1.0;
 
     for (const param of params) {
-      const match = param.match(/^q\s*=\s*([0-9.]+)$/i);
-      if (match) {
-        quality = parseFloat(match[1]);
+      const match = param.match(/^q\s*=\s*(?<value>[0-9.]+)$/iu);
+      if (match?.groups?.value) {
+        quality = parseFloat(match.groups.value);
         if (isNaN(quality)) quality = 1.0;
         quality = Math.max(0, Math.min(1, quality));
       }
@@ -75,7 +76,7 @@ export function negotiate(
   const candidates: { algorithm: CompressionAlgorithm; quality: number; serverRank: number }[] = [];
 
   for (let i = 0; i < preferredOrder.length; i++) {
-    const algo = preferredOrder[i];
+    const algo = preferredOrder[i]!;
 
     let quality: number | null = null;
     if (clientPrefs.has(algo)) {
@@ -102,5 +103,5 @@ export function negotiate(
     return a.serverRank - b.serverRank;
   });
 
-  return candidates[0].algorithm;
+  return candidates[0]!.algorithm;
 }
