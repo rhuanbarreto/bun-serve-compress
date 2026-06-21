@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "strict": true,
-    "noUncheckedIndexedAccess": true,
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",

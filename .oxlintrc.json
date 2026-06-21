@@ -72,7 +72,9 @@
       "rules": {
         "typescript/triple-slash-reference": "off",
         "no-await-in-loop": "off",
-        "unicorn/prefer-string-replace-all": "off"
+        "unicorn/prefer-string-replace-all": "off",
+        "prefer-named-capture-group": "off",
+        "require-unicode-regexp": "off"
       }
     }
   ]

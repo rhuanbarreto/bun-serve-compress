@@ -24,9 +24,9 @@ function parseAcceptEncoding(header: string): EncodingEntry[] {
     let quality = 1.0;
 
     for (const param of params) {
-      const match = param.match(/^q\s*=\s*([0-9.]+)$/i);
-      if (match?.[1]) {
-        quality = parseFloat(match[1]);
+      const match = param.match(/^q\s*=\s*(?<value>[0-9.]+)$/iu);
+      if (match?.groups?.value) {
+        quality = parseFloat(match.groups.value);
         if (isNaN(quality)) quality = 1.0;
         quality = Math.max(0, Math.min(1, quality));
       }

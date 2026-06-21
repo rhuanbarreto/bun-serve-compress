@@ -54,12 +54,12 @@
   },
   "scripts": {
     "test": "bun test",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
-    "check": "oxlint && oxfmt --check && tsc --noEmit",
+    "check": "oxlint --deny-warnings && oxfmt --check && tsc --noEmit",
     "commit": "cz",
     "commitlint": "commitlint",
     "changelog": "conventional-changelog -p angular -i CHANGELOG.md -s -r 0"
@@ -75,8 +75,8 @@
     "conventional-changelog-angular": "^8.0.0",
     "elysia": "^1.4.28",
     "hono": "^4.12.8",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "typescript": "^5.7"
   },
   "peerDependencies": {

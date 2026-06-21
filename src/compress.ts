@@ -31,7 +31,9 @@ function compressSync(
     }
 
     case "zstd":
-      return Bun.zstdCompressSync(data, { level: config.zstd.level }) as unknown as Uint8Array<ArrayBuffer>;
+      return Bun.zstdCompressSync(data, {
+        level: config.zstd.level,
+      }) as unknown as Uint8Array<ArrayBuffer>;
   }
 }
 
@@ -88,10 +90,10 @@ function buildHeaders(
   headers.set("content-encoding", algorithm);
 
   // Update or remove Content-Length
-  if (compressedSize !== null) {
-    headers.set("content-length", compressedSize.toString());
-  } else {
+  if (compressedSize === null) {
     headers.delete("content-length");
+  } else {
+    headers.set("content-length", compressedSize.toString());
   }
 
   // Append Vary: Accept-Encoding
