@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.1.5](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.4...v0.1.5) (2026-06-21)
+
+### Bug Fixes
+
+* **ci:** filter workflow_dispatch when finding release CI run ([#30](https://github.com/rhuanbarreto/bun-serve-compress/issues/30)) ([04c783c](https://github.com/rhuanbarreto/bun-serve-compress/commit/04c783ccde430035165694ae1cb89084987db887))
+* **ci:** skip release CI step when no version bump detected ([#28](https://github.com/rhuanbarreto/bun-serve-compress/issues/28)) ([4ed7ba9](https://github.com/rhuanbarreto/bun-serve-compress/commit/4ed7ba92a2bd05f6d491774d51c91d256b6af11e))
+
 ## [0.1.4](https://github.com/rhuanbarreto/bun-serve-compress/compare/v0.1.3...v0.1.4) (2026-06-21)
 
 ### Bug Fixes
