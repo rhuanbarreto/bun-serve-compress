@@ -14,14 +14,14 @@
         "conventional-changelog": "7.2.0",
         "conventional-changelog-angular": "8.3.1",
         "elysia": "1.4.29",
-        "hono": "4.12.26",
+        "hono": "4.13.5",
         "oxfmt": "0.55.0",
         "oxlint": "1.70.0",
         "typescript": "6.0.3",
       },
       "peerDependencies": {
         "elysia": ">=1.0.0",
-        "hono": ">=4.0.0",
+        "hono": ">=4.13.5",
       },
       "optionalPeers": [
         "elysia",
@@ -332,7 +332,7 @@
 
     "homedir-polyfill": ["homedir-polyfill@1.0.3", "", { "dependencies": { "parse-passwd": "^1.0.0" } }, "sha512-eSmmWE5bZTK2Nou4g0AI3zZ9rswp7GRKoKXS1BLUkvPviOqs4YTN1djQIqrXy9k5gEtdLPy86JjRwsNM9tnDcA=="],
 
-    "hono": ["hono@4.12.26", "", {}, "sha512-uyZtpnYxM9CmQ7QsQknM4zN8EftNqhON1qYeIKM0Se67CCEe2c44xyGURwB0axX2fBDu1dqHrHAc1hmNT8ITkw=="],
+    "hono": ["hono@4.13.5", "", {}, "sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw=="],
 
     "hosted-git-info": ["hosted-git-info@8.1.0", "", { "dependencies": { "lru-cache": "^10.0.1" } }, "sha512-Rw/B2DNQaPBICNXEm8balFz9a6WpZrkCGpcWFpy7nCj+NyhSdqXipmfvtmWt9xGfp0wZnBxB+iVpLmQMYt47Tw=="],
 
