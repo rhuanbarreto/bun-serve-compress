@@ -34,7 +34,8 @@ This ADR covers runtime selection, TypeScript configuration, and module system s
 - The minimum Bun version is **1.3.3**, required for `CompressionStream` with zstd algorithm support
 - The version constraint MUST be enforced both at build time (`engines.bun` in `package.json`) and at runtime (version guard in `src/serve.ts`)
 - The canonical minimum version MUST be defined in `src/constants.ts` as `MIN_BUN_VERSION_RANGE` and kept in sync with `package.json`
-- Bun-native APIs MUST be used for all compression operations: `Bun.gzipSync()`, `Bun.deflateSync()`, `Bun.zstdCompressSync()`, and `CompressionStream`
+- Bun-native APIs MUST be used for compression wherever Bun provides one: `Bun.gzipSync()`, `Bun.deflateSync()`, `Bun.zstdCompressSync()`, and `CompressionStream`
+- `node:zlib` is used only where Bun has no native equivalent: `brotliCompressSync()` for buffered brotli (there is no `Bun.brotliCompressSync()`), and the flushable streaming encoders (`createGzip()`, `createBrotliCompress()`, `createZstdCompress()`) for live streams. `CompressionStream` has no flush operation, so it cannot deliver a response chunk to the client before its internal buffer fills or the input ends
 - `Bun.semver.satisfies()` MUST be used for version checking
 
 ### Language: TypeScript (Strict)
@@ -56,7 +57,8 @@ This ADR covers runtime selection, TypeScript configuration, and module system s
 ### Do
 
 - **DO** use Bun-native compression APIs (`Bun.gzipSync`, `Bun.deflateSync`, `Bun.zstdCompressSync`) for synchronous compression of bodies <= 10 MB
-- **DO** use `CompressionStream` for streaming compression of bodies > 10 MB
+- **DO** use `CompressionStream` for streaming compression of bodies with a known size > 10 MB
+- **DO** use the flushable `node:zlib` encoders, flushed after every source chunk, for bodies without a known size that are still being produced
 - **DO** keep `MIN_BUN_VERSION_RANGE` in `src/constants.ts` synchronized with `engines.bun` in `package.json`
 - **DO** run the runtime version check (`checkBunVersion()`) on module load in `src/serve.ts`
 - **DO** use `Bun.semver.satisfies()` for all version comparisons — never parse version strings manually

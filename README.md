@@ -15,7 +15,9 @@ Bun.serve() has no built-in response compression ([oven-sh/bun#2726](https://git
 - **Automatic skip logic** — images, fonts, video, already-compressed responses, small bodies, SSE, and `Cache-Control: no-transform` are never compressed
 - **Sane defaults** — brotli quality 5 (not 11, which is [~30x slower](https://cran.r-project.org/web/packages/brotli/vignettes/benchmarks.html)), gzip level 6, zstd level 3
 - **Zero config** — works out of the box, but fully customizable
-- **Bun-native** — uses `Bun.gzipSync()`, `Bun.zstdCompressSync()`, and `CompressionStream` for maximum performance; `node:zlib` brotliCompressSync for brotli (Bun has no native `Bun.brotliCompressSync()` yet)
+- **Bun-native** — uses `Bun.gzipSync()`, `Bun.zstdCompressSync()`, and `CompressionStream` for maximum performance; `node:zlib` brotliCompressSync for brotli (Bun has no native `Bun.brotliCompressSync()`)
+- **Streaming-safe** — responses still being produced (SSR, NDJSON, progress output) are compressed chunk by chunk and flushed as they arrive, never held until the end
+- **Every route type** — static `Response` routes are compressed once per algorithm and cached; `Bun.file()` routes are compressed while keeping 404, `Last-Modified`, `304` and Range behavior
 - **HTTP spec compliant** — correct `Vary`, `Content-Encoding`, `Content-Length`, ETag, and `Cache-Control: no-transform` handling
 
 ## Install
@@ -187,7 +189,8 @@ serve({
 - Responses with existing `Content-Encoding` header (already compressed)
 - Responses with `Transfer-Encoding` containing a compression algorithm (gzip, deflate, br, zstd) — `Transfer-Encoding: chunked` alone does NOT skip
 - Responses with `Cache-Control: no-transform` (RFC 7234 §5.2.2.4 — intermediaries MUST NOT alter the representation)
-- Responses smaller than `minSize` (default: 1024 bytes)
+- Responses smaller than `minSize` (default: 1024 bytes) — checked when the size is known up front or the whole body is already available; a body still being streamed is compressed regardless of its final size
+- Partial content (responses with `Content-Range`, e.g. `206`) — the range refers to the unencoded bytes (RFC 9110 §14.4)
 - Responses with no body (`null` body)
 - `204 No Content`, `304 Not Modified`, `101 Switching Protocols`
 - `HEAD` requests
@@ -222,11 +225,14 @@ Case-insensitive matching is supported (`GZIP`, `GZip`, `gzip` all work).
 
 ## Compression Paths
 
-| Body type         | Strategy                                  | When                                                                              |
-| ----------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| Known size ≤ 10MB | Sync compression (`Bun.gzipSync`, etc.)   | Fastest path for typical responses                                                |
-| Unknown size      | Buffer → check minSize → sync compression | Catches small bodies without `Content-Length` (e.g., static `Response` in routes) |
-| Known size > 10MB | `CompressionStream` streaming             | Avoids buffering entire body in memory                                            |
+| Body                                                                   | Strategy                                           | Content-Length         |
+| ---------------------------------------------------------------------- | -------------------------------------------------- | ---------------------- |
+| `Content-Length` ≤ 10MB                                                | Sync compression (`Bun.gzipSync`, etc.)            | Set to compressed size |
+| `Content-Length` > 10MB                                                | `CompressionStream`                                | Removed                |
+| No `Content-Length`, whole body available (strings, buffers, …)        | minSize check, then sync compression               | Set to compressed size |
+| No `Content-Length`, body still being produced (or over 10MB buffered) | Live stream: `node:zlib` encoder flushed per chunk | Removed                |
+
+Without a `Content-Length`, the library reads whatever the body can deliver without waiting on I/O. If that reaches the end of the body, it is a buffered body and takes the sync path. If a read has to wait, the handler is still producing output, so compression starts right away and each chunk is flushed to the client as soon as the handler emits it.
 
 ### Sync compression details
 
@@ -238,24 +244,27 @@ Case-insensitive matching is supported (`GZIP`, `GZip`, `gzip` all work).
 
 ### Streaming compression details
 
-All three algorithms use `CompressionStream` with Bun's extended format support:
+Large bodies of known size use `CompressionStream` with Bun's extended format support:
 
 - gzip → `new CompressionStream("gzip")`
 - brotli → `new CompressionStream("brotli")` (Bun extension, not in Web standard)
 - zstd → `new CompressionStream("zstd")` (Bun extension, not in Web standard)
 
+Live streams use `createGzip()`, `createBrotliCompress()` and `createZstdCompress()` from `node:zlib`, with the configured levels. `CompressionStream` has no flush operation and holds data back until its buffer fills or the input ends; these encoders are flushed after every chunk so the client receives a decodable block per chunk.
+
 ## Route Type Support
 
 The library handles all Bun.serve() route value types:
 
-| Route value                                    | Behavior                                                                                                                   |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `Response` object                              | Cloned and compressed per request (note: loses Bun's static route fast path — see [Known Limitations](#known-limitations)) |
-| Handler function `(req) => Response`           | Wrapped — response is compressed after handler returns                                                                     |
-| Method object `{ GET: fn, POST: fn }`          | Each method handler is wrapped individually                                                                                |
-| HTML import (`import page from './page.html'`) | Passed through to Bun's bundler pipeline untouched                                                                         |
-| `false`                                        | Passed through — Bun falls through to the `fetch` handler                                                                  |
-| `null` / `undefined`                           | Passed through as-is                                                                                                       |
+| Route value                                    | Behavior                                                                                                                                                       |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Response` object                              | Compressed once per algorithm on first use, then served from that cached variant (see [Known Limitations](#known-limitations))                                 |
+| `Bun.file()`                                   | Served like Bun's file routes (404, `Last-Modified`, `304`, Range) and compressed; never-compressed types (images, fonts, archives, …) keep Bun's native route |
+| Handler function `(req) => Response`           | Wrapped — response is compressed after handler returns                                                                                                         |
+| Method object `{ GET: fn, POST: fn }`          | Each method handler is wrapped individually                                                                                                                    |
+| HTML import (`import page from './page.html'`) | Passed through to Bun's bundler pipeline untouched                                                                                                             |
+| `false`                                        | Passed through — Bun falls through to the `fetch` handler                                                                                                      |
+| `null` / `undefined`                           | Passed through as-is                                                                                                                                           |
 
 ## Exported Utilities
 
@@ -281,7 +290,7 @@ import type {
 
 ## Testing
 
-234 tests covering negotiation, skip logic, compression integrity, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, Elysia plugin, and Hono middleware. Run with:
+288 tests covering negotiation, skip logic, compression integrity, live streaming, file and static routes, HTTP semantics, concurrency, large body integrity, Bun-specific compatibility, Elysia plugin, and Hono middleware. Run with:
 
 ```bash
 bun test
@@ -299,6 +308,7 @@ The test suite was designed by studying the test suites of established HTTP comp
 | **Go net/http gziphandler**  | Threshold boundary conditions (exact size, off-by-one), parallel compression benchmarks, large body integrity, Accept-Encoding: identity                          | [gzip_test.go](https://github.com/nytimes/gziphandler/blob/master/gzip_test.go)                                                                                            |
 | **Nginx gzip module**        | Transfer-Encoding already set, MIME type prefix matching, no-transform directive                                                                                  | [ngx_http_gzip_module docs](https://nginx.org/en/docs/http/ngx_http_gzip_module.html)                                                                                      |
 | **Hono compress**            | Cache-Control no-transform, Transfer-Encoding checks, identity encoding handling                                                                                  | [compress/index.test.ts](https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts)                                                                   |
+| **pillarjs/send**            | Conditional GET (If-None-Match over If-Modified-Since, invalid dates), Range responses left unencoded                                                             | [test/send.js](https://github.com/pillarjs/send/blob/master/test/send.js)                                                                                                  |
 | **Bun test suite**           | Static route cloning, fetch auto-decompression, CompressionStream formats, empty body regression, double-compression prevention                                   | [test/regression/issue/](https://github.com/oven-sh/bun/tree/main/test/regression/issue), [test/js/web/fetch/](https://github.com/oven-sh/bun/tree/main/test/js/web/fetch) |
 
 Each test file includes a detailed header comment documenting which specific test cases came from which source.
@@ -307,11 +317,15 @@ Each test file includes a detailed header comment documenting which specific tes
 
 ### Static route performance trade-off
 
-When using static `Response` objects in routes (e.g., `"/": new Response("hello")`), Bun normally serves them via an optimized fast path that bypasses the JS event loop entirely. This library converts static routes into handler functions (to clone and compress per-request), which loses that optimization. For most applications this is negligible — the compression savings far outweigh the routing overhead.
+When using static `Response` objects in routes (e.g., `"/": new Response("hello")`), Bun normally serves them via an optimized fast path that bypasses the JS event loop entirely. This library turns static routes into handler functions so it can negotiate an encoding per request. The compression itself runs once per algorithm and the result is cached, so each request only clones an already-compressed response.
+
+### File route trade-off
+
+`Bun.file()` routes with a compressible type are served from a handler, which reproduces Bun's 404, `Last-Modified` and `If-Modified-Since` handling. Range requests are answered uncompressed; Bun returns `206 Partial Content` for them on Bun ≥ 1.4 and the full file on earlier versions. The file is read on every request, so changes on disk are served immediately.
 
 ### Future Bun auto-compression
 
-Bun's HTTP server has a [TODO comment](https://github.com/oven-sh/bun/issues/2726) to add built-in compression. If/when Bun adds native auto-compression to `Bun.serve()`, this library could cause double-compression. We will update the library to detect and respect any future Bun compression flag. Monitor issue [#2726](https://github.com/oven-sh/bun/issues/2726) for updates.
+As of Bun 1.4.2, `Bun.serve()` does not compress HTTP responses. Bun's HTTP server has a [TODO comment](https://github.com/oven-sh/bun/issues/2726) to add built-in compression. If/when Bun adds native auto-compression to `Bun.serve()`, this library could cause double-compression. We will update the library to detect and respect any future Bun compression flag. Monitor issue [#2726](https://github.com/oven-sh/bun/issues/2726) for updates.
 
 ### Bun's fetch() auto-decompression
 
@@ -319,7 +333,11 @@ Bun's `fetch()` client **automatically decompresses** responses and **strips the
 
 ### Streaming compression quality
 
-The `CompressionStream` API (used for bodies > 10MB) does not accept quality/level parameters for all formats. For the sync path (≤ 10MB), compression levels are fully configurable. For most real-world responses, the sync path is used.
+The `CompressionStream` API (used for bodies with a `Content-Length` over 10MB) does not accept quality/level parameters. Every other path — sync compression and live streams — uses the configured levels.
+
+### Live stream flushing
+
+Live streams are flushed after every chunk the handler emits. A handler that emits many tiny chunks gets a slightly lower compression ratio than one that emits fewer, larger chunks.
 
 ## Requirements
 

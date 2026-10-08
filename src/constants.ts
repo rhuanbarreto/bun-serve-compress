@@ -1,6 +1,13 @@
 import type { CompressionAlgorithm, ResolvedCompressionOptions } from "./types";
 
 /**
+ * Minimum supported Bun version (semver range), kept in sync with engines.bun.
+ * Requires Bun >= 1.3.3 for CompressionStream with zstd support.
+ */
+export const MIN_BUN_VERSION_RANGE = ">=1.3.3";
+export const MIN_BUN_VERSION_DISPLAY = "1.3.3";
+
+/**
  * Default algorithm preference order.
  * zstd is fastest with best ratio, brotli has great ratio, gzip is universal fallback.
  */
@@ -13,6 +20,12 @@ export const DEFAULT_ZSTD_LEVEL = 3;
 
 /** Minimum response size in bytes to trigger compression */
 export const DEFAULT_MIN_SIZE = 1024;
+
+/**
+ * Largest body (in bytes) compressed in a single buffered pass.
+ * Bodies above this size are compressed as a stream to bound memory usage.
+ */
+export const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 
 /**
  * MIME types that should NOT be compressed (exact matches).

@@ -1,15 +1,14 @@
 import { compress, addVaryHeader } from "./compress";
 import { resolveConfig } from "./config";
+import { MIN_BUN_VERSION_DISPLAY, MIN_BUN_VERSION_RANGE } from "./constants";
+import { fileResponse, isBunFile } from "./file";
 import { negotiate } from "./negotiate";
-import { shouldSkip } from "./skip";
-import type { ResolvedCompressionOptions, ServeCompressOptions } from "./types";
-
-/**
- * Minimum supported Bun version (semver range).
- * Requires Bun >= 1.3.3 for CompressionStream with zstd support.
- */
-const MIN_BUN_VERSION_RANGE = ">=1.3.3";
-const MIN_BUN_VERSION_DISPLAY = "1.3.3";
+import { isSkippedContentType, shouldSkip } from "./skip";
+import type {
+  CompressionAlgorithm,
+  ResolvedCompressionOptions,
+  ServeCompressOptions,
+} from "./types";
 
 /**
  * Check that the current Bun version meets the minimum requirement.
@@ -143,10 +142,59 @@ function wrapFetch<WS>(
 }
 
 /**
+ * Wrap a static Response route.
+ *
+ * The body never changes, so each algorithm's compressed variant is produced once,
+ * on the first request that negotiates it, and cloned for every later request.
+ * Skip checks and negotiation still run per request because they depend on the
+ * request (method, Accept-Encoding, a custom shouldCompress).
+ */
+function wrapStaticResponse<WS>(
+  response: Response,
+  config: ResolvedCompressionOptions,
+): RouteHandlerFn<WS> {
+  const variants = new Map<CompressionAlgorithm, Promise<Response>>();
+
+  return async function (req: Request) {
+    const res = response.clone();
+    if (shouldSkip(req, res, config)) return res;
+
+    const algorithm = negotiate(req.headers.get("accept-encoding") ?? "", config.algorithms);
+    if (!algorithm) return addVaryHeader(res);
+
+    let variant = variants.get(algorithm);
+    if (!variant) {
+      variant = compress(res, algorithm, config);
+      variants.set(algorithm, variant);
+    }
+
+    const compressed = await variant;
+    return compressed.clone();
+  };
+}
+
+/**
+ * Wrap a Bun.file() route: serve the file the way Bun's native file routes do,
+ * then compress it.
+ */
+function wrapFileRoute<WS>(
+  file: Bun.BunFile,
+  config: ResolvedCompressionOptions,
+): RouteHandlerFn<WS> {
+  return async function (req: Request) {
+    const res = await fileResponse(req, file);
+    // Bun serves the requested byte range of the unencoded file
+    if (req.headers.has("range")) return res;
+    return compressResponse(req, res, config);
+  };
+}
+
+/**
  * Wrap route handlers to add compression.
  *
  * Routes can be:
  * - Response objects (static)
+ * - Bun.file() values (static files)
  * - Handler functions (req => Response)
  * - HTML imports (special Bun objects — pass through untouched)
  * - Method-specific objects { GET: handler, POST: handler }
@@ -177,6 +225,13 @@ function wrapRouteHandler<WS>(
     return handler;
   }
 
+  // Bun.file() — served like Bun's native file routes, then compressed.
+  // Types that are never compressed (images, fonts, archives…) keep the native route.
+  if (isBunFile(handler)) {
+    if (isSkippedContentType(handler.type, config)) return handler;
+    return wrapFileRoute(handler, config);
+  }
+
   // HTML import — Bun handles these specially for frontend bundling.
   // They are objects with specific internal properties that Bun's serve recognizes.
   // We must NOT wrap these — let Bun handle them natively.
@@ -184,12 +239,9 @@ function wrapRouteHandler<WS>(
     return handler;
   }
 
-  // Response object (static route) — wrap in a function that clones and compresses per request
+  // Response object (static route) — compressed once per algorithm, then cloned
   if (handler instanceof Response) {
-    return function (req: Request) {
-      const cloned = handler.clone();
-      return compressResponse(req, cloned, config);
-    };
+    return wrapStaticResponse(handler, config);
   }
 
   // Handler function

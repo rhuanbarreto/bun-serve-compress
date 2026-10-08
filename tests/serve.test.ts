@@ -18,8 +18,11 @@
  *
  * - Hono compress: HEAD request bypass, SSE skip, SVG compression (image/* exception)
  *   https://github.com/honojs/hono/blob/main/src/middleware/compress/index.test.ts
+ *
+ * - Bun static routes: static Response values served repeatedly from a cached body
+ *   https://github.com/oven-sh/bun/blob/main/test/js/bun/http/bun-serve-static.test.ts
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { serve } from "../src/serve";
 import { brotliDecompressSync } from "node:zlib";
 
@@ -510,5 +513,139 @@ describe("serve() with custom config", () => {
     } as any);
 
     expect(res.headers.get("content-encoding")).toBe("gzip");
+  });
+});
+
+const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+describe("static Response route caching", () => {
+  let server: ReturnType<typeof Bun.serve>;
+  let baseUrl: string;
+
+  beforeAll(() => {
+    server = serve({
+      port: 0,
+      compression: {
+        // Per-request decision, to verify it still runs once a variant is cached
+        shouldCompress: (req) => req.headers.get("x-compress") !== "no",
+      },
+      routes: {
+        "/static": new Response(largeBody, {
+          headers: { "content-type": "text/html", etag: '"static-v1"' },
+        }),
+        "/static-small": new Response("tiny", { headers: { "content-type": "text/html" } }),
+        "/dynamic": () => new Response(largeBody, { headers: { "content-type": "text/html" } }),
+      },
+      fetch: () => new Response("not found", { status: 404 }),
+    });
+    baseUrl = `http://localhost:${server.port}`;
+  });
+
+  afterAll(() => {
+    server.stop(true);
+  });
+
+  const get = (path: string, headers?: Record<string, string>, method = "GET") =>
+    fetch(`${baseUrl}${path}`, { method, headers, decompress: false } as RequestInit);
+
+  /** Request a path and read its body to completion. */
+  const drain = async (path: string, headers?: Record<string, string>) => {
+    const res = await get(path, headers);
+    await res.arrayBuffer();
+  };
+
+  test("compresses a static route once per algorithm", async () => {
+    const gzipSpy = spyOn(Bun, "gzipSync");
+    try {
+      for (let i = 0; i < 5; i++) {
+        const res = await get("/static", { "accept-encoding": "gzip" });
+        expect(res.headers.get("content-encoding")).toBe("gzip");
+        const data = new Uint8Array(await res.arrayBuffer());
+        expect(new TextDecoder().decode(Bun.gunzipSync(data))).toBe(largeBody);
+      }
+      expect(gzipSpy).toHaveBeenCalledTimes(1);
+
+      // Dynamic handlers produce a new body each time, so they compress per request
+      gzipSpy.mockClear();
+      for (let i = 0; i < 3; i++) {
+        await drain("/dynamic", { "accept-encoding": "gzip" });
+      }
+      expect(gzipSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      gzipSpy.mockRestore();
+    }
+  });
+
+  test("caches each algorithm's variant separately", async () => {
+    for (let round = 0; round < 2; round++) {
+      const gzip = await get("/static", { "accept-encoding": "gzip" });
+      const br = await get("/static", { "accept-encoding": "br" });
+      const zstd = await get("/static", { "accept-encoding": "zstd" });
+
+      expect(gzip.headers.get("content-encoding")).toBe("gzip");
+      expect(br.headers.get("content-encoding")).toBe("br");
+      expect(zstd.headers.get("content-encoding")).toBe("zstd");
+
+      expect(decode(Bun.gunzipSync(new Uint8Array(await gzip.arrayBuffer())))).toBe(largeBody);
+      expect(decode(brotliDecompressSync(new Uint8Array(await br.arrayBuffer())))).toBe(largeBody);
+      expect(decode(Bun.zstdDecompressSync(new Uint8Array(await zstd.arrayBuffer())))).toBe(
+        largeBody,
+      );
+    }
+  });
+
+  test("cached variants keep compressed headers", async () => {
+    await drain("/static", { "accept-encoding": "gzip" });
+    const res = await get("/static", { "accept-encoding": "gzip" });
+    const data = new Uint8Array(await res.arrayBuffer());
+
+    expect(res.headers.get("content-length")).toBe(String(data.byteLength));
+    expect(res.headers.get("vary")).toBe("Accept-Encoding");
+    expect(res.headers.get("etag")).toBe('W/"static-v1"');
+    expect(res.headers.get("content-type")).toBe("text/html");
+  });
+
+  test("serves parallel requests from one variant without corruption", async () => {
+    const bodies = await Promise.all(
+      Array.from({ length: 20 }, async () => {
+        const res = await get("/static", { "accept-encoding": "zstd" });
+        return new TextDecoder().decode(
+          Bun.zstdDecompressSync(new Uint8Array(await res.arrayBuffer())),
+        );
+      }),
+    );
+    for (const body of bodies) expect(body).toBe(largeBody);
+  });
+
+  test("still applies shouldCompress per request after caching", async () => {
+    await drain("/static", { "accept-encoding": "gzip" });
+
+    const skipped = await get("/static", { "accept-encoding": "gzip", "x-compress": "no" });
+    expect(skipped.headers.has("content-encoding")).toBe(false);
+    expect(await skipped.text()).toBe(largeBody);
+
+    const compressed = await get("/static", { "accept-encoding": "gzip" });
+    expect(compressed.headers.get("content-encoding")).toBe("gzip");
+  });
+
+  test("serves the original body when no encoding is acceptable", async () => {
+    const res = await get("/static", { "accept-encoding": "identity" });
+
+    expect(res.headers.has("content-encoding")).toBe(false);
+    expect(res.headers.get("vary")).toBe("Accept-Encoding");
+    expect(await res.text()).toBe(largeBody);
+  });
+
+  test("HEAD requests on a static route are not compressed", async () => {
+    const res = await get("/static", { "accept-encoding": "gzip" }, "HEAD");
+    expect(res.headers.has("content-encoding")).toBe(false);
+  });
+
+  test("a static body below minSize stays uncompressed on repeated requests", async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await get("/static-small", { "accept-encoding": "gzip" });
+      expect(res.headers.has("content-encoding")).toBe(false);
+      expect(await res.text()).toBe("tiny");
+    }
   });
 });
