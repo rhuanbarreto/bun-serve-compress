@@ -1,4 +1,11 @@
-import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
+import {
+  brotliCompressSync,
+  constants as zlibConstants,
+  createBrotliCompress,
+  createGzip,
+  createZstdCompress,
+} from "node:zlib";
+import { MAX_BUFFER_SIZE } from "./constants";
 import type { CompressionAlgorithm, ResolvedCompressionOptions } from "./types";
 
 /**
@@ -6,7 +13,7 @@ import type { CompressionAlgorithm, ResolvedCompressionOptions } from "./types";
  *
  * Uses Bun's native sync compression functions for gzip and zstd,
  * and node:zlib's brotliCompressSync for brotli (Bun has no native
- * Bun.brotliCompressSync yet).
+ * Bun.brotliCompressSync).
  */
 function compressSync(
   data: Uint8Array<ArrayBuffer>,
@@ -15,7 +22,9 @@ function compressSync(
 ): Uint8Array<ArrayBuffer> {
   switch (algorithm) {
     case "gzip":
-      return Bun.gzipSync(data, { level: config.gzip.level as any }) as Uint8Array<ArrayBuffer>;
+      return Bun.gzipSync(data, {
+        level: config.gzip.level as Bun.ZlibCompressionOptions["level"],
+      });
 
     case "br": {
       const compressed = brotliCompressSync(data, {
@@ -23,41 +32,214 @@ function compressSync(
           [zlibConstants.BROTLI_PARAM_QUALITY]: config.brotli.level,
         },
       });
-      return new Uint8Array(
-        compressed.buffer,
-        compressed.byteOffset,
-        compressed.byteLength,
-      ) as Uint8Array<ArrayBuffer>;
+      return new Uint8Array(compressed.buffer, compressed.byteOffset, compressed.byteLength);
     }
 
-    case "zstd":
-      return Bun.zstdCompressSync(data, {
-        level: config.zstd.level,
-      }) as unknown as Uint8Array<ArrayBuffer>;
+    case "zstd": {
+      const compressed = Bun.zstdCompressSync(data, { level: config.zstd.level });
+      // Bun allocates a fresh (never shared) ArrayBuffer for the output
+      return new Uint8Array(
+        compressed.buffer as ArrayBuffer,
+        compressed.byteOffset,
+        compressed.byteLength,
+      );
+    }
   }
 }
 
 /**
- * Create a compressed ReadableStream using CompressionStream API.
+ * Create a compressed ReadableStream using the CompressionStream API.
+ * Used for large bodies of known size, where per-chunk latency does not matter.
  */
 function compressStream(body: ReadableStream, algorithm: CompressionAlgorithm): ReadableStream {
-  // Map algorithm names to CompressionStream format
-  let format: string;
+  // Bun names brotli "brotli" in CompressionStream; the HTTP token is "br"
+  const format: Bun.CompressionFormat = algorithm === "br" ? "brotli" : algorithm;
+  // The DOM lib types CompressionStream with the standard formats only
+  return body.pipeThrough(new CompressionStream(format as CompressionFormat));
+}
+
+/**
+ * Create a node:zlib streaming encoder for the algorithm.
+ *
+ * CompressionStream exposes no flush operation, so it holds data back until its
+ * internal buffer fills or the input ends. These encoders support flush(), which
+ * emits everything written so far as a decodable block.
+ */
+function createFlushableEncoder(
+  algorithm: CompressionAlgorithm,
+  config: ResolvedCompressionOptions,
+) {
   switch (algorithm) {
     case "gzip":
-      format = "gzip";
-      break;
+      return createGzip({ level: config.gzip.level });
     case "br":
-      // Bun supports "brotli" as a custom format name in CompressionStream
-      format = "brotli";
-      break;
+      return createBrotliCompress({
+        params: { [zlibConstants.BROTLI_PARAM_QUALITY]: config.brotli.level },
+      });
     case "zstd":
-      format = "zstd";
-      break;
+      return createZstdCompress({
+        params: { [zlibConstants.ZSTD_c_compressionLevel]: config.zstd.level },
+      });
   }
+}
 
-  const stream = new CompressionStream(format as CompressionFormat);
-  return body.pipeThrough(stream as any);
+const textEncoder = new TextEncoder();
+
+/**
+ * Normalize a chunk read from a response body stream to bytes.
+ * Handler-provided streams may enqueue strings or any ArrayBuffer view.
+ */
+function toBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (typeof value === "string") return textEncoder.encode(value);
+  throw new TypeError("Response body stream produced a chunk that is not bytes or a string");
+}
+
+/** Join chunks into one contiguous buffer. */
+function concatChunks(chunks: Uint8Array[], size: number): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+type BodyReader = ReadableStreamDefaultReader<unknown>;
+type BodyReadResult = Awaited<ReturnType<BodyReader["read"]>>;
+
+const PENDING = Symbol("pending");
+
+/** Resolve with PENDING after the current macrotask, once all ready microtasks have run. */
+function afterMicrotasks(): Promise<typeof PENDING> {
+  const { promise, resolve } = Promise.withResolvers<typeof PENDING>();
+  setImmediate(() => resolve(PENDING));
+  return promise;
+}
+
+interface AvailableBody {
+  chunks: Uint8Array[];
+  size: number;
+  /** The stream ended: `chunks` hold the entire body. */
+  done: boolean;
+  /** A read that had not resolved when draining stopped; its result belongs after `chunks`. */
+  pending: Promise<BodyReadResult> | null;
+}
+
+/**
+ * Read every chunk the body can deliver without waiting on I/O.
+ *
+ * Buffered bodies (strings, typed arrays, synchronously-filled streams) resolve each
+ * read within the same macrotask, so they are read to the end. A stream still being
+ * produced by the handler stops at the first read that has to wait, so nothing it
+ * has not sent yet is waited on. Draining also stops once MAX_BUFFER_SIZE is passed.
+ */
+async function readAvailable(
+  reader: BodyReader,
+  chunks: Uint8Array[] = [],
+  size = 0,
+): Promise<AvailableBody> {
+  if (size > MAX_BUFFER_SIZE) return { chunks, size, done: false, pending: null };
+
+  const read = reader.read();
+  const result = await Promise.race([read, afterMicrotasks()]);
+
+  if (result === PENDING) return { chunks, size, done: false, pending: read };
+  if (result.done) return { chunks, size, done: true, pending: null };
+
+  const bytes = toBytes(result.value);
+  chunks.push(bytes);
+  return readAvailable(reader, chunks, size + bytes.byteLength);
+}
+
+/**
+ * Compress a body that is still being produced, flushing the encoder after every
+ * source chunk so each chunk reaches the client as soon as the handler emits it.
+ *
+ * `available` holds the chunks already read from `reader` (and possibly one
+ * in-flight read); they are compressed first, in order.
+ */
+function compressLiveStream(
+  reader: BodyReader,
+  available: AvailableBody,
+  algorithm: CompressionAlgorithm,
+  config: ResolvedCompressionOptions,
+): ReadableStream<Uint8Array> {
+  const encoder = createFlushableEncoder(algorithm, config);
+  const output: Uint8Array[] = [];
+  let pending = available.pending;
+
+  encoder.on("data", (chunk: Buffer) => {
+    output.push(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+  });
+
+  const flush = (): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    encoder.flush(() => resolve());
+    return promise;
+  };
+
+  const finish = (): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    encoder.once("end", () => resolve());
+    encoder.end();
+    return promise;
+  };
+
+  /** Move encoder output into the stream. Returns whether anything was enqueued. */
+  const emit = (controller: ReadableStreamDefaultController<Uint8Array>): boolean => {
+    if (output.length === 0) return false;
+    for (const chunk of output) controller.enqueue(chunk);
+    output.length = 0;
+    return true;
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      encoder.on("error", (error) => controller.error(error));
+      if (available.chunks.length === 0) return;
+      for (const chunk of available.chunks) encoder.write(chunk);
+      await flush();
+      emit(controller);
+    },
+
+    async pull(controller) {
+      // Reads until a chunk produces output: a pull that enqueues nothing is not
+      // re-invoked by the stream machinery.
+      const step = async (): Promise<void> => {
+        const result = await (pending ?? reader.read());
+        pending = null;
+
+        if (result.done) {
+          await finish();
+          emit(controller);
+          controller.close();
+          return;
+        }
+
+        encoder.write(toBytes(result.value));
+        await flush();
+        if (!emit(controller)) await step();
+      };
+
+      try {
+        await step();
+      } catch (error) {
+        encoder.destroy();
+        throw error;
+      }
+    },
+
+    async cancel(reason) {
+      encoder.destroy();
+      await reader.cancel(reason);
+    },
+  });
 }
 
 /**
@@ -108,15 +290,32 @@ function buildHeaders(
   return headers;
 }
 
+/** Build a compressed response from a fully buffered body. */
+function compressBuffered(
+  res: Response,
+  buffer: Uint8Array<ArrayBuffer>,
+  algorithm: CompressionAlgorithm,
+  config: ResolvedCompressionOptions,
+): Response {
+  const compressed = compressSync(buffer, algorithm, config);
+  return new Response(compressed, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: buildHeaders(res.headers, algorithm, compressed.byteLength),
+  });
+}
+
 /**
  * Compress an HTTP Response.
  *
- * Chooses between sync (buffered) and streaming compression based on the response body type:
- * - If the body can be read as an ArrayBuffer (non-streaming), use sync compression
- * - If the body is a ReadableStream, use CompressionStream
- *
- * Also performs a final minSize check after buffering — this catches cases where
- * Content-Length was not set on the original response (e.g., static Route responses).
+ * Picks a strategy from what is known about the body:
+ * - Content-Length <= 10 MB: buffered, synchronous compression
+ * - Content-Length > 10 MB: streaming compression via CompressionStream
+ * - No Content-Length: reads whatever the body delivers without waiting on I/O.
+ *   If that is the whole body, the minSize check applies and it is compressed
+ *   synchronously. Otherwise the body is still being produced, and it is
+ *   compressed as a live stream that flushes after every chunk, so streamed
+ *   responses (SSR, NDJSON, progress output) are not held back.
  *
  * Returns a new Response with compressed body and updated headers.
  */
@@ -125,62 +324,50 @@ export async function compress(
   algorithm: CompressionAlgorithm,
   config: ResolvedCompressionOptions,
 ): Promise<Response> {
-  // Check if we should use streaming or buffered compression
-  // If bodyUsed is true, we can't read it — shouldn't happen but guard against it
+  // A consumed body cannot be read again — shouldn't happen but guard against it
   if (res.bodyUsed) return res;
 
   const body = res.body;
   if (!body) return res;
 
-  // Try buffered (sync) compression first — faster for small/medium responses
-  // We check if we can read the full body. If Content-Length is known and reasonable
-  // (< 10MB), use sync. Otherwise use streaming.
   const contentLength = res.headers.get("content-length");
   const knownSize = contentLength ? parseInt(contentLength, 10) : null;
-  const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB
 
   if (knownSize !== null && knownSize <= MAX_BUFFER_SIZE) {
-    // Known size, fits in memory — sync path
-    const buffer = new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>;
-    const compressed = compressSync(buffer, algorithm, config);
-
-    return new Response(compressed as BodyInit, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: buildHeaders(res.headers, algorithm, compressed.byteLength),
-    });
+    const buffer = new Uint8Array(await res.arrayBuffer());
+    return compressBuffered(res, buffer, algorithm, config);
   }
 
   if (knownSize !== null) {
-    // Known size but too large — streaming path
-    const compressedStream = compressStream(body, algorithm);
-
-    return new Response(compressedStream, {
+    return new Response(compressStream(body, algorithm), {
       status: res.status,
       statusText: res.statusText,
       headers: buildHeaders(res.headers, algorithm, null),
     });
   }
 
-  // Unknown size (no Content-Length) — buffer to check minSize, then compress
-  // This handles static Response objects that don't set Content-Length
-  const buffer = new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>;
+  const reader: BodyReader = body.getReader();
+  const available = await readAvailable(reader);
 
-  if (buffer.byteLength < config.minSize) {
-    // Below threshold — return uncompressed with original body
-    return new Response(buffer as BodyInit, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: new Headers(res.headers),
-    });
+  if (available.done) {
+    const buffer = concatChunks(available.chunks, available.size);
+
+    if (buffer.byteLength < config.minSize) {
+      // Below threshold — return uncompressed with original body
+      return new Response(buffer, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: new Headers(res.headers),
+      });
+    }
+
+    return compressBuffered(res, buffer, algorithm, config);
   }
 
-  const compressed = compressSync(buffer, algorithm, config);
-
-  return new Response(compressed as BodyInit, {
+  return new Response(compressLiveStream(reader, available, algorithm, config), {
     status: res.status,
     statusText: res.statusText,
-    headers: buildHeaders(res.headers, algorithm, compressed.byteLength),
+    headers: buildHeaders(res.headers, algorithm, null),
   });
 }
 

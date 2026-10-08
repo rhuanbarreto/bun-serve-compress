@@ -48,6 +48,23 @@ function hasNoTransform(res: Response): boolean {
 }
 
 /**
+ * Check whether a Content-Type value names a type that is never compressed
+ * (already-compressed or binary formats from the configured skip list).
+ *
+ * "image/png" → true, "text/html; charset=utf-8" → false
+ */
+export function isSkippedContentType(
+  contentType: string,
+  config: ResolvedCompressionOptions,
+): boolean {
+  return mimeMatchesSkipList(
+    extractMimeType(contentType),
+    config.skipMimeTypes,
+    config.skipMimePrefixes,
+  );
+}
+
+/**
  * Determine whether compression should be skipped for this request/response pair.
  *
  * Returns true if compression should be SKIPPED (response passed through as-is).
@@ -86,29 +103,28 @@ export function shouldSkip(
     }
   }
 
-  // 6. Cache-Control: no-transform — MUST NOT alter representation (RFC 7234)
+  // 6. Partial content — Content-Range describes byte offsets of the unencoded
+  // representation, so the body must not be re-encoded (RFC 9110 Section 14.4)
+  if (res.headers.has("content-range")) return true;
+
+  // 7. Cache-Control: no-transform — MUST NOT alter representation (RFC 7234)
   if (hasNoTransform(res)) return true;
 
-  // 7. No body
+  // 8. No body
   if (res.body === null) return true;
 
-  // 8. Check Content-Type against skip list
+  // 9. Check Content-Type against skip list
   const contentType = res.headers.get("content-type");
-  if (contentType) {
-    const mime = extractMimeType(contentType);
-    if (mimeMatchesSkipList(mime, config.skipMimeTypes, config.skipMimePrefixes)) {
-      return true;
-    }
-  }
+  if (contentType && isSkippedContentType(contentType, config)) return true;
 
-  // 9. Body size below minimum threshold (only if Content-Length is known)
+  // 10. Body size below minimum threshold (only if Content-Length is known)
   const contentLength = res.headers.get("content-length");
   if (contentLength !== null) {
     const size = parseInt(contentLength, 10);
     if (!isNaN(size) && size < config.minSize) return true;
   }
 
-  // 10. User's custom shouldCompress function
+  // 11. User's custom shouldCompress function
   if (config.shouldCompress && !config.shouldCompress(req, res)) {
     return true;
   }

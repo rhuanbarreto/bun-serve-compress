@@ -24,9 +24,13 @@
  *
  * - Koa/compress: custom shouldCompress function, SVG exception for image/* skip
  *   https://github.com/koajs/compress/blob/master/test/index.test.ts
+ *
+ * - RFC 9110 Section 14.4: Content-Range responses carry byte offsets of the
+ *   unencoded representation and must not be re-encoded
+ *   https://www.rfc-editor.org/rfc/rfc9110#section-14.4
  */
 import { describe, expect, test } from "bun:test";
-import { shouldSkip } from "../src/skip";
+import { isSkippedContentType, shouldSkip } from "../src/skip";
 import { getDefaultResolvedConfig } from "../src/constants";
 
 function makeRequest(options?: { method?: string; headers?: Record<string, string> }): Request {
@@ -656,5 +660,56 @@ describe("shouldSkip", () => {
       });
       expect(shouldSkip(req, res, disabledConfig)).toBe(true);
     });
+  });
+});
+
+describe("partial content", () => {
+  test("skips a 206 response with Content-Range", () => {
+    const res = makeResponse("x".repeat(2000), {
+      status: 206,
+      headers: {
+        "content-type": "text/plain",
+        "content-range": "bytes 0-1999/5000",
+        "content-length": "2000",
+      },
+    });
+    expect(shouldSkip(makeRequest(), res, config)).toBe(true);
+  });
+
+  test("skips a 416 response with Content-Range", () => {
+    const res = makeResponse("x".repeat(2000), {
+      status: 416,
+      headers: { "content-type": "text/plain", "content-range": "bytes */5000" },
+    });
+    expect(shouldSkip(makeRequest(), res, config)).toBe(true);
+  });
+});
+
+describe("isSkippedContentType", () => {
+  test("matches exact skip-list types", () => {
+    expect(isSkippedContentType("application/zip", config)).toBe(true);
+    expect(isSkippedContentType("text/event-stream", config)).toBe(true);
+  });
+
+  test("matches skip-list prefixes", () => {
+    expect(isSkippedContentType("image/png", config)).toBe(true);
+    expect(isSkippedContentType("font/woff2", config)).toBe(true);
+  });
+
+  test("ignores parameters and case", () => {
+    expect(isSkippedContentType("Image/PNG; foo=bar", config)).toBe(true);
+    expect(isSkippedContentType("TEXT/HTML; charset=utf-8", config)).toBe(false);
+  });
+
+  test("does not match compressible types or exceptions", () => {
+    expect(isSkippedContentType("text/javascript;charset=utf-8", config)).toBe(false);
+    expect(isSkippedContentType("application/json", config)).toBe(false);
+    expect(isSkippedContentType("image/svg+xml", config)).toBe(false);
+  });
+
+  test("follows a custom skip list", () => {
+    const custom = { ...config, skipMimeTypes: new Set(["text/csv"]), skipMimePrefixes: [] };
+    expect(isSkippedContentType("text/csv", custom)).toBe(true);
+    expect(isSkippedContentType("image/png", custom)).toBe(false);
   });
 });

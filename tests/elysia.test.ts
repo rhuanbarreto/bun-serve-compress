@@ -9,6 +9,24 @@ import { Elysia } from "elysia";
 import { compress } from "../src/elysia";
 
 const largeBody = "Elysia compression test content. ".repeat(200);
+/** Response whose first chunk is ready at once and later chunks arrive 300 ms apart. */
+function liveResponse(): Response {
+  const parts = ["live part one. ".repeat(100), "live part two. ".repeat(100), "done"];
+  let index = 0;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(parts[index++]));
+    },
+    async pull(controller) {
+      await Bun.sleep(300);
+      if (index >= parts.length) controller.close();
+      else controller.enqueue(new TextEncoder().encode(parts[index++]));
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "text/plain" } });
+}
+
+const liveBody = "live part one. ".repeat(100) + "live part two. ".repeat(100) + "done";
 
 describe("Elysia plugin", () => {
   let baseUrl: string;
@@ -19,6 +37,7 @@ describe("Elysia plugin", () => {
       .use(compress())
       .get("/text", () => new Response(largeBody, { headers: { "content-type": "text/html" } }))
       .get("/json", () => Response.json({ data: largeBody }))
+      .get("/stream", () => liveResponse())
       .get("/small", () => new Response("tiny", { headers: { "content-type": "text/html" } }))
       .get("/image", () => new Response("fake", { headers: { "content-type": "image/png" } }))
       .get(
@@ -137,6 +156,31 @@ describe("Elysia plugin", () => {
     for (const body of results) {
       expect(body).toBe(largeBody);
     }
+  });
+
+  test("streams a live response without waiting for it to finish", async () => {
+    const started = performance.now();
+    const res = await fetch(`${baseUrl}/stream`, {
+      headers: { "accept-encoding": "gzip" },
+      decompress: false,
+    } as RequestInit);
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    const firstChunkMs = performance.now() - started;
+
+    expect(res.headers.get("content-encoding")).toBe("gzip");
+    expect(res.headers.has("content-length")).toBe(false);
+    // The handler needs ~900 ms to finish; the first chunk must not wait for that
+    expect(firstChunkMs).toBeLessThan(300);
+
+    const chunks: Uint8Array[] = [first.value!];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const data = new Uint8Array(await new Blob(chunks).arrayBuffer());
+    expect(new TextDecoder().decode(Bun.gunzipSync(data))).toBe(liveBody);
   });
 });
 
